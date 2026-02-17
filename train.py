@@ -15,8 +15,10 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+from torch.utils.tensorboard import SummaryWriter
 from torchvision.datasets import ImageFolder
 from torchvision import transforms
+from torchvision.utils import make_grid
 import numpy as np
 from collections import OrderedDict
 from PIL import Image
@@ -26,6 +28,8 @@ from time import time
 import argparse
 import logging
 import os
+
+from tqdm import tqdm
 
 from models import DiT_models
 from diffusion import create_diffusion
@@ -103,6 +107,42 @@ def center_crop_arr(pil_image, image_size):
     return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
 
 
+@torch.no_grad()
+def generate_samples(ema_model, vae, diffusion, latent_size, device,
+                     num_classes, cfg_scale=4.0, num_samples=10, seed=0):
+    """
+    Generate a grid of sample images from the EMA model for TensorBoard logging.
+    Uses classifier-free guidance and a fixed seed for consistent comparison
+    across epochs.
+    """
+    rng_state = torch.random.get_rng_state()
+    cuda_rng_state = torch.cuda.get_rng_state(device)
+    torch.manual_seed(seed)
+
+    n = num_samples
+    z = torch.randn(n, 4, latent_size, latent_size, device=device)
+    y = torch.randint(0, num_classes, (n,), device=device)
+
+    z = torch.cat([z, z], 0)
+    y_null = torch.tensor([num_classes] * n, device=device)
+    y = torch.cat([y, y_null], 0)
+    model_kwargs = dict(y=y, cfg_scale=cfg_scale)
+
+    samples = diffusion.p_sample_loop(
+        ema_model.forward_with_cfg, z.shape, z, clip_denoised=False,
+        model_kwargs=model_kwargs, progress=False, device=device
+    )
+    samples, _ = samples.chunk(2, dim=0)
+    samples = vae.decode(samples / 0.18215).sample
+
+    torch.random.set_rng_state(rng_state)
+    torch.cuda.set_rng_state(cuda_rng_state, device)
+
+    samples = torch.clamp((samples + 1) / 2, 0, 1)
+    grid = make_grid(samples, nrow=5, padding=2)
+    return grid
+
+
 #################################################################################
 #                                  Training Loop                                #
 #################################################################################
@@ -148,11 +188,19 @@ def main(args):
     requires_grad(ema, False)
     model = DDP(model.to(device), device_ids=[rank])
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
-    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
+    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}", local_files_only=True).to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
+
+    # Setup TensorBoard and sampling diffusion (rank 0 only):
+    writer = None
+    if rank == 0:
+        tb_dir = f"{experiment_dir}/tensorboard"
+        writer = SummaryWriter(log_dir=tb_dir)
+        logger.info(f"TensorBoard logs at {tb_dir}")
+    sample_diffusion = create_diffusion(str(args.num_sampling_steps))
 
     # Setup data:
     transform = transforms.Compose([
@@ -195,7 +243,8 @@ def main(args):
     for epoch in range(args.epochs):
         sampler.set_epoch(epoch)
         logger.info(f"Beginning epoch {epoch}...")
-        for x, y in loader:
+        batch_iter = tqdm(loader, desc=f"Epoch {epoch}", disable=(rank != 0))
+        for x, y in batch_iter:
             x = x.to(device)
             y = y.to(device)
             with torch.no_grad():
@@ -224,6 +273,10 @@ def main(args):
                 dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
                 avg_loss = avg_loss.item() / dist.get_world_size()
                 logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+                if writer is not None:
+                    writer.add_scalar("train/loss", avg_loss, train_steps)
+                    writer.add_scalar("train/steps_per_sec", steps_per_sec, train_steps)
+                    writer.add_scalar("train/epoch", epoch, train_steps)
                 # Reset monitoring variables:
                 running_loss = 0
                 log_steps = 0
@@ -243,9 +296,25 @@ def main(args):
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
                 dist.barrier()
 
+        # Generate and log sample images every sample_every epochs:
+        if args.sample_every > 0 and (epoch + 1) % args.sample_every == 0:
+            if rank == 0:
+                logger.info(f"Generating sample images at epoch {epoch}...")
+                grid = generate_samples(
+                    ema, vae, sample_diffusion, latent_size, device,
+                    num_classes=args.num_classes, cfg_scale=args.cfg_scale,
+                    num_samples=10, seed=args.global_seed,
+                )
+                writer.add_image("samples/ema_generations", grid, epoch)
+                writer.flush()
+                logger.info(f"Logged sample grid to TensorBoard (epoch {epoch})")
+            dist.barrier()
+
     model.eval()  # important! This disables randomized embedding dropout
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
 
+    if writer is not None:
+        writer.close()
     logger.info("Done!")
     cleanup()
 
@@ -265,5 +334,11 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--sample-every", type=int, default=10,
+                        help="Generate and log sample images every N epochs (0 to disable).")
+    parser.add_argument("--cfg-scale", type=float, default=4.0,
+                        help="Classifier-free guidance scale for sample generation.")
+    parser.add_argument("--num-sampling-steps", type=int, default=250,
+                        help="Number of DDPM steps for sample generation.")
     args = parser.parse_args()
     main(args)
