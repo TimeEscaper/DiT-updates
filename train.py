@@ -7,6 +7,7 @@
 """
 A minimal training script for DiT using PyTorch DDP.
 """
+import autoroot
 import torch
 # the first flag below was False when we tested this script but True makes A100 training a lot faster:
 torch.backends.cuda.matmul.allow_tf32 = True
