@@ -26,12 +26,18 @@ class VAEPreprocessor(ABC):
 class VAEAdapter(ABC):
 
     def __init__(self, 
-                 name: str):
+                 name: str,
+                 n_channels: int):
         self._name = name
+        self._n_channels = n_channels
 
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def n_channels(self) -> int:
+        return self._n_channels
 
     @property
     @abstractmethod
@@ -73,9 +79,15 @@ class WANOfficialPreprocessor(VAEPreprocessor):
         if (std == 0).any():
             raise ValueError(f"std evaluated to zero after conversion to {dtype}, leading to division by zero.")
         if mean.ndim == 1:
-            mean = mean.view(-1, 1, 1)
+            if image.ndim == 3:
+                mean = mean.view(-1, 1, 1)
+            else:
+                mean = mean.view(1, -1, 1, 1)
         if std.ndim == 1:
-            std = std.view(-1, 1, 1)
+            if image.ndim == 3:
+                std = std.view(-1, 1, 1)
+            else:
+                std = std.view(1, -1, 1, 1)
         image = image.clone()
         image.mul_(std).add_(mean)
         return image
@@ -93,6 +105,44 @@ class WANOfficialAdapter(VAEAdapter):
             3.2687, 2.1526, 2.8652, 1.5579, 1.6382, 1.1253, 2.8251, 1.9160
         ]
 
+    _IMAGENET_2012_200_MEAN = [
+        -0.2692396938800812,
+        0.016344642266631126,
+        -0.581970751285553,
+        0.13159914314746857,
+        -0.33105555176734924,
+        0.20614323019981384,
+        -0.08000203967094421,
+        -0.044480957090854645,
+        -0.031538818031549454,
+        -0.33836299180984497,
+        0.10065454989671707,
+        0.670249879360199,
+        0.11405237764120102,
+        -1.4489037990570068,
+        0.8505193591117859,
+        0.588209331035614
+    ]
+
+    _IMAGENET_2012_200_STD = [
+        1.1033473014831543,
+        0.6348368525505066,
+        1.0813809633255005,
+        1.233666181564331,
+        0.6216264963150024,
+        0.7697148323059082,
+        0.9015212655067444,
+        0.9805298447608948,
+        1.2172343730926514,
+        0.8471845984458923,
+        0.985538125038147,
+        0.6242260932922363,
+        0.6484224200248718,
+        0.5665448307991028,
+        1.212532877922058,
+        0.898713231086731
+    ]
+
     def __init__(self, 
                  name: str = "wan_2.1_official",
                  checkpoint: str | Path = "Wan2.1-T2V-14B/Wan2.1_VAE.pth",
@@ -100,7 +150,7 @@ class WANOfficialAdapter(VAEAdapter):
                  latent_stats: str | None = "official",
                  device: str = "cuda",
                  dtype: torch.dtype = torch.float32):
-        super(WANOfficialAdapter, self).__init__(name=name)
+        super(WANOfficialAdapter, self).__init__(name=name, n_channels=16)
         latent_norm_type = LatentNormalizationType(latent_norm_type)
 
         checkpoint = resolve_path(checkpoint, "model")
@@ -115,9 +165,14 @@ class WANOfficialAdapter(VAEAdapter):
         if latent_stats is None:
             mean = [0.] * model.z_dim
             std = [1.] * model.z_dim
-        else:
+        elif latent_stats == "official":
             mean = WANOfficialAdapter._OFFICIAL_MEAN
             std = WANOfficialAdapter._OFFICIAL_STD
+        elif latent_stats == "imagenet2012_200":
+            mean = WANOfficialAdapter._IMAGENET_2012_200_MEAN
+            std = WANOfficialAdapter._IMAGENET_2012_200_STD
+        else:
+            raise ValueError(f"Invalid latent stats: {latent_stats}")
         
         mean = torch.tensor(mean, dtype=dtype, device=device)
         std = torch.tensor(std, dtype=dtype, device=device)
@@ -132,6 +187,7 @@ class WANOfficialAdapter(VAEAdapter):
     def create_preprocessor(self) -> VAEPreprocessor:
         return WANOfficialPreprocessor()
 
+    @torch.inference_mode()
     def encode(self, 
                images: torch.Tensor, 
                normalize: bool = True,
@@ -172,6 +228,7 @@ class WANOfficialAdapter(VAEAdapter):
 
         return latents, info
 
+    @torch.inference_mode()
     def decode(self, 
                latents: torch.Tensor, 
                denormalize: bool = True) -> tuple[torch.Tensor, dict[str, Any]]:
