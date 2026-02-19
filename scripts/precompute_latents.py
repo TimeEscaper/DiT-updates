@@ -108,8 +108,6 @@ def process_split(split: str,
             buffer = []
             buffer_size = 0
             chunk_idx += 1
-
-        break
         
     if len(buffer) > 0:
         chunk_data = np.concatenate(buffer, axis=0)
