@@ -351,8 +351,5 @@ if __name__ == "__main__":
                         help="Classifier-free guidance scale for sample generation.")
     parser.add_argument("--num-sampling-steps", type=int, default=250,
                         help="Number of DDPM steps for sample generation.")
-    parser.add_argument("--master-port", type=str, default="12355",
-                        help="Master port for DDP communication.")
     args = parser.parse_args()
-    os.environ["MASTER_PORT"] = args.master_port
     main(args)
