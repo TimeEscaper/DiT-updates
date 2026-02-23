@@ -143,11 +143,49 @@ class WANOfficialAdapter(VAEAdapter):
         0.898713231086731
     ]
 
+    _IMAGENET_2012_MEAN = [
+        -0.256296306848526,
+        0.0077391150407493114,
+        -0.5914746522903442,
+        0.15141397714614868,
+        -0.3327605426311493,
+        0.20220015943050385,
+        -0.10974644124507904,
+        -0.016261115670204163,
+        -0.07461243122816086,
+        -0.31013739109039307,
+        0.14704173803329468,
+        0.6520771980285645,
+        0.11393015831708908,
+        -1.4250420331954956,
+        0.8589756488800049,
+        0.5744618773460388
+    ]
+
+    _IMAGENET_2012_STD = [
+        1.0565978288650513,
+        0.6282875537872314,
+        1.0575528144836426,
+        1.238028883934021,
+        0.6162665486335754,
+        0.764495849609375,
+        0.9022724628448486,
+        0.9402367472648621,
+        1.2197587490081787,
+        0.8188892602920532,
+        0.9723860621452332,
+        0.6259068250656128,
+        0.6376462578773499,
+        0.5674147009849548,
+        1.221549391746521,
+        0.9011343121528625
+    ]
+
     def __init__(self, 
                  name: str = "wan_2.1_official",
                  checkpoint: str | Path = "Wan2.1-T2V-14B/Wan2.1_VAE.pth",
                  latent_norm_type: LatentNormalizationType | str  = LatentNormalizationType.SCALE,
-                 latent_stats: str | None = "official",
+                 latent_stats: str | None = "imagenet2012",
                  device: str = "cuda",
                  dtype: torch.dtype = torch.float32):
         super(WANOfficialAdapter, self).__init__(name=name, n_channels=16)
@@ -171,6 +209,9 @@ class WANOfficialAdapter(VAEAdapter):
         elif latent_stats == "imagenet2012_200":
             mean = WANOfficialAdapter._IMAGENET_2012_200_MEAN
             std = WANOfficialAdapter._IMAGENET_2012_200_STD
+        elif latent_stats == "imagenet2012":
+            mean = WANOfficialAdapter._IMAGENET_2012_MEAN
+            std = WANOfficialAdapter._IMAGENET_2012_STD
         else:
             raise ValueError(f"Invalid latent stats: {latent_stats}")
         

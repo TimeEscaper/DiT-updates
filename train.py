@@ -172,7 +172,7 @@ def main(args):
                              checkpoint="Wan2.1-T2V-14B/Wan2.1_VAE.pth", 
                              device=device,
                              latent_norm_type="scale",
-                             latent_stats="imagenet2012_200")
+                             latent_stats="imagenet2012")
 
     # TODO: Make this factor configurable
     latent_size = args.image_size // 8
@@ -314,7 +314,11 @@ def main(args):
                 )
                 writer.add_image("samples/ema_generations", grid, epoch)
                 writer.flush()
-                logger.info(f"Logged sample grid to TensorBoard (epoch {epoch})")
+                samples_dir = f"{experiment_dir}/samples"
+                os.makedirs(samples_dir, exist_ok=True)
+                grid_np = grid.permute(1, 2, 0).mul(255).clamp(0, 255).byte().cpu().numpy()
+                Image.fromarray(grid_np).save(f"{samples_dir}/epoch_{epoch:09d}.jpg")
+                logger.info(f"Logged sample grid to TensorBoard and saved to disk (epoch {epoch})")
             dist.barrier()
 
     model.eval()  # important! This disables randomized embedding dropout
@@ -347,5 +351,8 @@ if __name__ == "__main__":
                         help="Classifier-free guidance scale for sample generation.")
     parser.add_argument("--num-sampling-steps", type=int, default=250,
                         help="Number of DDPM steps for sample generation.")
+    parser.add_argument("--master-port", type=str, default="12355",
+                        help="Master port for DDP communication.")
     args = parser.parse_args()
+    os.environ["MASTER_PORT"] = args.master_port
     main(args)
