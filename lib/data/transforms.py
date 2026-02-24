@@ -5,8 +5,17 @@ from PIL import Image
 
 def center_crop_arr(pil_image, image_size):
     """
-    Center cropping implementation from ADM.
+    Center crop a PIL Image to a square of the desired size.
+
+    Implementation taken from ADM:
     https://github.com/openai/guided-diffusion/blob/8fb3ad9197f16bbc40620447b2742e13458d2831/guided_diffusion/image_datasets.py#L126
+
+    Args:
+        pil_image (PIL.Image.Image): The input image to crop.
+        image_size (int): The target size for the shortest side.
+
+    Returns:
+        PIL.Image.Image: The center-cropped image of size (image_size, image_size).
     """
     while min(*pil_image.size) >= 2 * image_size:
         pil_image = pil_image.resize(
@@ -25,9 +34,31 @@ def center_crop_arr(pil_image, image_size):
 
 
 class DiTCenterCrop:
+    """
+    Center crop transformation for images.
+    Standard transform for DiT.
+
+    Attributes:
+        _image_size (int): The size to which the image will be center cropped.
+    """
 
     def __init__(self, image_size: int):
+        """
+        Initialize the DiTCenterCrop with the desired image size.
+
+        Args:
+            image_size (int): Desired size to center crop the image to (image will become square).
+        """
         self._image_size = image_size
 
     def __call__(self, image: Image.Image) -> Image.Image:
+        """
+        Apply the center crop transform to the input image.
+
+        Args:
+            image (PIL.Image.Image): Input image to transform.
+
+        Returns:
+            PIL.Image.Image: Center-cropped image.
+        """
         return center_crop_arr(image, self._image_size)

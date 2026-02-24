@@ -8,76 +8,190 @@ from pathlib import Path
 from lib.vae.models.wan import _video_vae
 from lib.utils.files import resolve_path
 from lib.vae.models.distributions import DiagonalGaussianDistribution
-from lib.vae.models.normalization import (LatentNormalizationType, 
-    NumPyLatentNormalizer, TorchLatentNormalizer)
+from lib.vae.models.normalization import (LatentNormalizationType,
+                                          TorchLatentNormalizer)
 
 
 class VAEPreprocessor(ABC):
+    """
+    Abstract base class for VAE preprocessors.
+    Inspired by HuggingFace preprocessors, which are part of the models.
+    """
 
     @abstractmethod
-    def __call__(image: torch.Tensor) -> torch.Tensor:
+    def __call__(self, image: torch.Tensor) -> torch.Tensor:
+        """
+        Preprocess the input image tensor.
+
+        Args:
+            image (torch.Tensor): Input image tensor.
+
+        Returns:
+            torch.Tensor: Preprocessed image tensor.
+        """
         pass
 
     @abstractmethod
     def inverse(self, image: torch.Tensor) -> torch.Tensor:
+        """
+        Inverse the preprocessing operation on the input image tensor.
+        Useful to produce proper image samples.
+
+        Args:
+            image (torch.Tensor): Preprocessed image tensor.
+
+        Returns:
+            torch.Tensor: Image tensor restored to original space.
+        """
         pass
 
 
 class VAEAdapter(ABC):
+    """
+    Abstract base class for VAE model adapters.
+    Main purpose is to provide a unified interface for different VAE models,
+    in order to introduce as little changes to original DiT training code
+    as possible.
 
-    def __init__(self, 
+    Conventions:
+    - Preprocessors must be produced by model (adapter).
+    - Encode and decode should return main tensor (latent/images) and aux dict.
+    - Encode and decode should support both batched and single input tensors.
+    - Wrapped VAE should be in eval mode.
+    """
+
+    def __init__(self,
                  name: str,
                  n_channels: int):
+        """
+        Initialize the VAE adapter.
+
+        Args:
+            name (str): Name of the adapter/model.
+            n_channels (int): Number of latent channels.
+        """
         self._name = name
         self._n_channels = n_channels
 
     @property
     def name(self) -> str:
+        """
+        Get the adapter/model name.
+
+        Returns:
+            str: Adapter/model name.
+        """
         return self._name
 
     @property
     def n_channels(self) -> int:
+        """
+        Get the number of latent channels.
+
+        Returns:
+            int: Number of latent channels.
+        """
         return self._n_channels
 
     @property
     @abstractmethod
     def latent_normalizer(self) -> TorchLatentNormalizer:
+        """
+        Return the latent normalizer instance.
+
+        Returns:
+            TorchLatentNormalizer: The latent normalizer.
+        """
         pass
 
     @abstractmethod
     def create_preprocessor(self) -> VAEPreprocessor:
+        """
+        Create and return a VAEPreprocessor for this adapter.
+
+        Returns:
+            VAEPreprocessor: The preprocessor instance.
+        """
         pass
 
     @abstractmethod
-    def encode(self, 
-               images: torch.Tensor, 
+    def encode(self,
+               images: torch.Tensor,
                normalize: bool = True,
                sample: bool = True) -> tuple[torch.Tensor, dict[str, Any]]:
+        """
+        Encode input images to latent space.
+
+        Args:
+            images (torch.Tensor): Batched images (B, C, H, W) or single image (C, H, W).
+            normalize (bool, optional): Whether to normalize latents. Defaults to True.
+            sample (bool, optional): Whether to sample from latent distribution. Defaults to True.
+
+        Returns:
+            tuple[torch.Tensor, dict[str, Any]]: The encoded latent tensor and info dict.
+        """
         pass
 
     @abstractmethod
-    def decode(self, 
-               latents: torch.Tensor, 
+    def decode(self,
+               latents: torch.Tensor,
                denormalize: bool = True) -> tuple[torch.Tensor, dict[str, Any]]:
+        """
+        Decode latents to images.
+
+        Args:
+            latents (torch.Tensor): Latents (B, C, H, W) or (C, H, W).
+            denormalize (bool, optional): Whether to denormalize latents before decoding. Defaults to True.
+
+        Returns:
+            tuple[torch.Tensor, dict[str, Any]]: The reconstructed images and info dict.
+        """
         pass
 
 
 class WANOfficialPreprocessor(VAEPreprocessor):
+    """
+    Official preprocessor for the WAN VAE model.
+    """
 
     def __init__(self):
+        """
+        Initialize the preprocessor with standard normalization.
+        """
         super(WANOfficialPreprocessor, self).__init__()
-        self._normalize= T.Normalize(mean=[0.5, 0.5, 0.5], 
-                                     std=[0.5, 0.5, 0.5])
+        self._normalize = T.Normalize(mean=[0.5, 0.5, 0.5],
+                                      std=[0.5, 0.5, 0.5])
 
     def __call__(self, image: torch.Tensor) -> torch.Tensor:
+        """
+        Apply normalization to the image.
+
+        Args:
+            image (torch.Tensor): Input image tensor.
+
+        Returns:
+            torch.Tensor: Normalized image tensor.
+        """
         return self._normalize(image)
 
     def inverse(self, image: torch.Tensor) -> torch.Tensor:
+        """
+        Inverse normalization of the image.
+
+        Args:
+            image (torch.Tensor): Normalized image tensor.
+
+        Returns:
+            torch.Tensor: De-normalized image tensor.
+        """
         dtype = image.dtype
-        mean = torch.as_tensor(self._normalize.mean, dtype=dtype, device=image.device)
-        std = torch.as_tensor(self._normalize.std, dtype=dtype, device=image.device)
+        mean = torch.as_tensor(self._normalize.mean,
+                               dtype=dtype, device=image.device)
+        std = torch.as_tensor(self._normalize.std,
+                              dtype=dtype, device=image.device)
         if (std == 0).any():
-            raise ValueError(f"std evaluated to zero after conversion to {dtype}, leading to division by zero.")
+            raise ValueError(
+                f"std evaluated to zero after conversion to {dtype}, leading to division by zero.")
         if mean.ndim == 1:
             if image.ndim == 3:
                 mean = mean.view(-1, 1, 1)
@@ -94,17 +208,21 @@ class WANOfficialPreprocessor(VAEPreprocessor):
 
 
 class WANOfficialAdapter(VAEAdapter):
+    """
+    WAN VAE official adapter implementation.
+    """
 
     # From official code
     _OFFICIAL_MEAN = [
-            -0.7571, -0.7089, -0.9113, 0.1075, -0.1745, 0.9653, -0.1517, 1.5508,
-            0.4134, -0.0715, 0.5517, -0.3632, -0.1922, -0.9497, 0.2503, -0.2921
-        ]
+        -0.7571, -0.7089, -0.9113, 0.1075, -0.1745, 0.9653, -0.1517, 1.5508,
+        0.4134, -0.0715, 0.5517, -0.3632, -0.1922, -0.9497, 0.2503, -0.2921
+    ]
     _OFFICIAL_STD = [
-            2.8184, 1.4541, 2.3275, 2.6558, 1.2196, 1.7708, 2.6052, 2.0743,
-            3.2687, 2.1526, 2.8652, 1.5579, 1.6382, 1.1253, 2.8251, 1.9160
-        ]
+        2.8184, 1.4541, 2.3275, 2.6558, 1.2196, 1.7708, 2.6052, 2.0743,
+        3.2687, 2.1526, 2.8652, 1.5579, 1.6382, 1.1253, 2.8251, 1.9160
+    ]
 
+    # Computed from ImageNet2012_200 using precompute_latents.py
     _IMAGENET_2012_200_MEAN = [
         -0.2692396938800812,
         0.016344642266631126,
@@ -143,6 +261,7 @@ class WANOfficialAdapter(VAEAdapter):
         0.898713231086731
     ]
 
+    # Computed from ImageNet2012 using precompute_latents.py
     _IMAGENET_2012_MEAN = [
         -0.256296306848526,
         0.0077391150407493114,
@@ -181,13 +300,24 @@ class WANOfficialAdapter(VAEAdapter):
         0.9011343121528625
     ]
 
-    def __init__(self, 
+    def __init__(self,
                  name: str = "wan_2.1_official",
                  checkpoint: str | Path = "Wan2.1-T2V-14B/Wan2.1_VAE.pth",
-                 latent_norm_type: LatentNormalizationType | str  = LatentNormalizationType.SCALE,
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
                  latent_stats: str | None = "imagenet2012",
                  device: str = "cuda",
                  dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANOfficialAdapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan_2.1_official".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "Wan2.1-T2V-14B/Wan2.1_VAE.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "official", or None). Defaults to "imagenet2012".
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
         super(WANOfficialAdapter, self).__init__(name=name, n_channels=16)
         latent_norm_type = LatentNormalizationType(latent_norm_type)
 
@@ -214,32 +344,56 @@ class WANOfficialAdapter(VAEAdapter):
             std = WANOfficialAdapter._IMAGENET_2012_STD
         else:
             raise ValueError(f"Invalid latent stats: {latent_stats}")
-        
+
         mean = torch.tensor(mean, dtype=dtype, device=device)
         std = torch.tensor(std, dtype=dtype, device=device)
-        self._latent_normalizer = latent_norm_type.make_torch(mean, std, device)
+        self._latent_normalizer = latent_norm_type.make_torch(
+            mean, std, device)
 
         self._dtype = dtype
-    
+
     @property
     def latent_normalizer(self) -> TorchLatentNormalizer:
+        """
+        Return the latent normalizer instance.
+
+        Returns:
+            TorchLatentNormalizer: The latent normalizer.
+        """
         return self._latent_normalizer
 
     def create_preprocessor(self) -> VAEPreprocessor:
+        """
+        Create and return the WANOfficialPreprocessor instance.
+
+        Returns:
+            WANOfficialPreprocessor: Preprocessor object.
+        """
         return WANOfficialPreprocessor()
 
     @torch.inference_mode()
-    def encode(self, 
-               images: torch.Tensor, 
+    def encode(self,
+               images: torch.Tensor,
                normalize: bool = True,
                sample: bool = True) -> tuple[torch.Tensor, dict[str, Any]]:
+        """
+        Encode images into the latent space of the VAE.
+
+        Args:
+            images (torch.Tensor): Images to be encoded, (B, C, H, W) or (C, H, W).
+            normalize (bool, optional): Normalize latents using the latent normalizer. Defaults to True.
+            sample (bool, optional): Sample from posterior latent distribution. Defaults to True.
+
+        Returns:
+            tuple[torch.Tensor, dict[str, Any]]: Encoded latents and info dictionary.
+        """
         shape = images.shape
         if len(shape) == 3:  # (C, H, w)
             images = images.unsqueeze(0)  # (B, C, H, W)
             single = True
         else:  # (B, C, H, W)
             single = False
-        
+
         images = images.unsqueeze(2)  # (B, C, T, H, W) for model
 
         with amp.autocast(dtype=self._dtype):
@@ -270,9 +424,19 @@ class WANOfficialAdapter(VAEAdapter):
         return latents, info
 
     @torch.inference_mode()
-    def decode(self, 
-               latents: torch.Tensor, 
+    def decode(self,
+               latents: torch.Tensor,
                denormalize: bool = True) -> tuple[torch.Tensor, dict[str, Any]]:
+        """
+        Decode latents into images using the VAE decoder.
+
+        Args:
+            latents (torch.Tensor): Latents to decode. Shape can be (B, C, H, W) or (C, H, W).
+            denormalize (bool, optional): Denormalize latents before decoding. Defaults to True.
+
+        Returns:
+            tuple[torch.Tensor, dict[str, Any]]: Decoded images and info dictionary.
+        """
         shape = latents.shape
         if len(shape) == 3:  # (C, H, w)
             latents = latents.unsqueeze(0)  # (B, C, H, W)
@@ -287,7 +451,7 @@ class WANOfficialAdapter(VAEAdapter):
 
         with amp.autocast(dtype=self._dtype):
             images = self._model.decode(latents, None)
-        
+
         images = images.squeeze(2)  # (B, C, H, W)
         if single:
             images = images.squeeze(0)  # (C, H, W)

@@ -168,6 +168,7 @@ def main(args):
     # Create model:
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
 
+    # TODO: Remove hardcoded VAE
     vae = WANOfficialAdapter(name="wan_2.1_official", 
                              checkpoint="Wan2.1-T2V-14B/Wan2.1_VAE.pth", 
                              device=device,
@@ -341,7 +342,6 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=1400)
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
-    # parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
