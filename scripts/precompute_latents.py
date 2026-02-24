@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
 from tqdm import tqdm
-from lib.vae.adapters import VAEAdapter, WANOfficialAdapter
+from lib.vae.adapters import FLUXOfficialAdapter, VAEAdapter, WANOfficialAdapter
 from lib.data.imagenet import create_imagenet_dataset
 from lib.data.transforms import DiTCenterCrop
 
@@ -20,7 +20,8 @@ AVAILABLE_DATASETS = [
 ]
 
 AVAILABLE_MODELS = [
-    "wan-2.1-official"
+    "wan-2.1-official",
+    "flux-official",
 ]
 
 
@@ -29,6 +30,10 @@ def resolve_model(model: str, device: str) -> VAEAdapter:
         return WANOfficialAdapter(latent_norm_type="none",
                                   latent_stats=None,
                                   device=device)
+    elif model == "flux-official":
+        return FLUXOfficialAdapter(latent_norm_type="none",
+                                   latent_stats=None,
+                                   device=device)
     raise ValueError(f"Invalid model: {model}")
 
 
@@ -44,8 +49,9 @@ def process_split(split: str,
                   n_workers: int,
                   device: str) -> tuple[Path, dict]:
     dtype_suffix = "__float16" if float16 else ""
-    output_root = Path(output_root) / f"{dataset_name}__{model.name}__resolution_{resolution}{dtype_suffix}" / f"{split}"
-    
+    output_root = Path(output_root) / \
+        f"{dataset_name}__{model.name}__resolution_{resolution}{dtype_suffix}" / f"{split}"
+
     if output_root.is_dir():
         raise FileExistsError(f"Output dir exists: {output_root}")
     else:
@@ -53,16 +59,16 @@ def process_split(split: str,
         output_root.mkdir(parents=True, exist_ok=True)
 
     dataset = create_imagenet_dataset(
-        image_dir=f"{dataset_name}/{split}", 
-        transform=T.Compose([DiTCenterCrop(resolution), 
+        image_dir=f"{dataset_name}/{split}",
+        transform=T.Compose([DiTCenterCrop(resolution),
                              T.ToTensor(),
                              model.create_preprocessor()]))
 
-    dataloader = DataLoader(dataset, 
-                                 batch_size=batch_size, 
-                                 shuffle=False, 
-                                 num_workers=n_workers, 
-                                 pin_memory=True)
+    dataloader = DataLoader(dataset,
+                            batch_size=batch_size,
+                            shuffle=False,
+                            num_workers=n_workers,
+                            pin_memory=True)
 
     buffer = []
     label_buffer = []
@@ -104,11 +110,11 @@ def process_split(split: str,
             chunk_data = np.concatenate(buffer, axis=0)
             save_path = output_root / f"chunk_{chunk_idx:06d}.npy"
             np.save(save_path, chunk_data)
-            
+
             buffer = []
             buffer_size = 0
             chunk_idx += 1
-        
+
     if len(buffer) > 0:
         chunk_data = np.concatenate(buffer, axis=0)
         save_path = output_root / f"chunk_{chunk_idx:06d}.npy"
@@ -143,8 +149,8 @@ def process_split(split: str,
     return output_root, metadata
 
 
-def main(dataset: str, 
-         model: str, 
+def main(dataset: str,
+         model: str,
          output_root: str,
          resolution: int = 256,
          batch_size: int = 8,
@@ -152,33 +158,33 @@ def main(dataset: str,
          chunk_size: int = 10_000,
          float16: bool = False,
          device: str = "cuda"):
-    
+
     assert dataset in AVAILABLE_DATASETS, f"Invalid dataset: {dataset}"
     assert model in AVAILABLE_MODELS, f"Invalid model: {model}"
 
     model = resolve_model(model, device)
 
     output_dir, metadata = process_split(split="train",
-                                          dataset_name=dataset,
-                                          model=model,
-                                          resolution=resolution,
-                                          batch_size=batch_size,
-                                          output_root=output_root,
-                                          n_workers=n_workers,
-                                          device=device,
-                                          chunk_size=chunk_size,
-                                          float16=float16)
+                                         dataset_name=dataset,
+                                         model=model,
+                                         resolution=resolution,
+                                         batch_size=batch_size,
+                                         output_root=output_root,
+                                         n_workers=n_workers,
+                                         device=device,
+                                         chunk_size=chunk_size,
+                                         float16=float16)
 
     _, _ = process_split(split="val",
-                                          dataset_name=dataset,
-                                          model=model,
-                                          resolution=resolution,
-                                          batch_size=batch_size,
-                                          output_root=output_root,
-                                          n_workers=n_workers,
-                                          device=device,
-                                          chunk_size=chunk_size,
-                                          float16=float16)
+                         dataset_name=dataset,
+                         model=model,
+                         resolution=resolution,
+                         batch_size=batch_size,
+                         output_root=output_root,
+                         n_workers=n_workers,
+                         device=device,
+                         chunk_size=chunk_size,
+                         float16=float16)
 
     with open(output_dir.parent / "metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)
