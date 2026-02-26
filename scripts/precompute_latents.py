@@ -1,4 +1,7 @@
 import autoroot
+import autorootcwd
+import sys
+sys.path.append("sbervae")
 
 from pathlib import Path
 
@@ -13,6 +16,7 @@ from dit_updates.vae.adapters.base import VAEAdapter
 from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
 from dit_updates.data.imagenet import create_imagenet_dataset
 from dit_updates.data.transforms import DiTCenterCrop
+from dit_updates.vae.adapters.registry import resolve_adapter
 
 
 AVAILABLE_DATASETS = [
@@ -21,7 +25,8 @@ AVAILABLE_DATASETS = [
 ]
 
 AVAILABLE_MODELS = [
-    "wan-2.1-official"
+    "wan-2.1-official",
+    "wan-mil-yuv2rgb"
 ]
 
 
@@ -39,11 +44,10 @@ def resolve_model(model: str, device: str) -> VAEAdapter:
     Raises:
         ValueError: If an invalid model is supplied.
     """
-    if model == "wan-2.1-official":
-        return WANOfficialAdapter(latent_norm_type="none",
-                                  latent_stats=None,
-                                  device=device)
-    raise ValueError(f"Invalid model: {model}")
+    return resolve_adapter(model, 
+                           latent_norm_type="none",
+                           latent_stats=None, 
+                           device=device)
 
 
 @torch.inference_mode()

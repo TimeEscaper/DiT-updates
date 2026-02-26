@@ -67,8 +67,46 @@ class WANYuv2RgbAdapter(VAEAdapter):
     Internal WAN 2.1 YUV2RGB adapter implementation.
     """
 
+    _IMAGENET_2012_200_MEAN = [
+        -7.196443038992584e-05,
+        -0.19263234734535217,
+        -0.0060315364971756935,
+        -0.008871454745531082,
+        0.012358635663986206,
+        -0.1800689995288849,
+        -0.028683781623840332,
+        0.09497839212417603,
+        0.014750940725207329,
+        0.0012209581909701228,
+        -0.013892349787056446,
+        0.0063743325881659985,
+        0.03340122103691101,
+        0.11512420326471329,
+        0.1839529573917389,
+        -0.06042119115591049
+    ],
+
+    _IMAGENET_2012_200_STD = [
+        0.0006977790035307407,
+        0.6388314962387085,
+        0.9277921915054321,
+        0.7258686423301697,
+        0.9773375391960144,
+        0.8358289003372192,
+        0.7998051643371582,
+        1.0100041627883911,
+        0.6669394373893738,
+        1.0282669067382812,
+        0.7665238380432129,
+        0.7367441058158875,
+        0.8998191356658936,
+        0.7038764357566833,
+        0.6587797999382019,
+        0.6429328322410583
+    ]
+
     def __init__(self,
-                 name: str = "wan_mil_yuv2rgb",
+                 name: str = "wan-mil-yuv2rgb",
                  checkpoint: str | Path = "MIL-Wan2.1-YUV2RGB/model.pth",
                  latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
                  latent_stats: str | None = None,
@@ -100,7 +138,8 @@ class WANYuv2RgbAdapter(VAEAdapter):
             mean = [0.] * model.z_dim
             std = [1.] * model.z_dim
         elif latent_stats == "imagenet2012_200":
-            raise NotImplementedError(f"{latent_stats} computed ready yet")
+            mean = WANYuv2RgbAdapter._IMAGENET_2012_200_MEAN
+            std = WANYuv2RgbAdapter._IMAGENET_2012_200_STD
         elif latent_stats == "imagenet2012":
             raise NotImplementedError(f"{latent_stats} computed ready yet")
         else:
@@ -164,13 +203,13 @@ class WANYuv2RgbAdapter(VAEAdapter):
             latents = distribution.sample()
         else:
             latents = distribution.mode()
+        latents = latents.squeeze(2)  # (B, C, H, W)
+        mean = mean.squeeze(2)
+        logvar = logvar.squeeze(2)
 
         if normalize:
             latents = self._latent_normalizer.normalize(latents)
 
-        latents = latents.squeeze(2)  # (B, C, H, W)
-        mean = mean.squeeze(2)
-        logvar = logvar.squeeze(2)
         if single:
             latents = latents.squeeze(0)  # (C, H, W)
             mean = mean.squeeze(0)
