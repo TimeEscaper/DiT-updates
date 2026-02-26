@@ -7,39 +7,36 @@
 """
 A minimal training script for DiT using PyTorch DDP.
 """
+from lib.utils.files import resolve_path
+from lib.data.transforms import DiTCenterCrop
+from lib.data.latent_datasets import LatentsShardDataset
+from lib.vae.adapters import FLUXOfficialAdapter, VAEAdapter, WANOfficialAdapter
+from diffusers.models import AutoencoderKL
+from diffusion import create_diffusion
+from models import DiT_models
+from tqdm import tqdm
+import os
+import logging
+import argparse
+from time import time
+from glob import glob
+from copy import deepcopy
+from PIL import Image
+from collections import OrderedDict
+import numpy as np
+from torchvision.utils import make_grid
+from torchvision import transforms
+from torchvision.datasets import ImageFolder
+from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import DataLoader
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.distributed as dist
 import autoroot
 import torch
 # the first flag below was False when we tested this script but True makes A100 training a lot faster:
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
-from torch.utils.tensorboard import SummaryWriter
-from torchvision.datasets import ImageFolder
-from torchvision import transforms
-from torchvision.utils import make_grid
-import numpy as np
-from collections import OrderedDict
-from PIL import Image
-from copy import deepcopy
-from glob import glob
-from time import time
-import argparse
-import logging
-import os
-
-from tqdm import tqdm
-
-from models import DiT_models
-from diffusion import create_diffusion
-from diffusers.models import AutoencoderKL
-
-from lib.vae.adapters import VAEAdapter, WANOfficialAdapter
-from lib.data.latent_datasets import LatentsShardDataset
-from lib.data.transforms import DiTCenterCrop
-from lib.utils.files import resolve_path
 
 
 #################################################################################
@@ -168,11 +165,20 @@ def main(args):
     # Create model:
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
 
-    vae = WANOfficialAdapter(name="wan_2.1_official", 
-                             checkpoint="Wan2.1-T2V-14B/Wan2.1_VAE.pth", 
-                             device=device,
-                             latent_norm_type="scale",
-                             latent_stats="imagenet2012")
+    if args.vae == "wan":
+        vae = WANOfficialAdapter(name="wan_2.1_official",
+                                 checkpoint="Wan2.1-T2V-14B/Wan2.1_VAE.pth",
+                                 device=device,
+                                 latent_norm_type="scale",
+                                 latent_stats="imagenet2012")
+    elif args.vae == "flux":
+        vae = FLUXOfficialAdapter(name="flux_vae_f8c16",
+                                  checkpoint="flux_vae/flux-vae-f8c16-1.0/ae.safetensors",
+                                  latent_norm_type="scale",
+                                  latent_stats="imagenet2012_200",
+                                  device=device)
+    else:
+        raise ValueError(f"Unknown vae model: '{args.vae}'")
 
     # TODO: Make this factor configurable
     latent_size = args.image_size // 8
@@ -186,7 +192,7 @@ def main(args):
     requires_grad(ema, False)
     model = DDP(model.to(device), device_ids=[rank])
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
-    
+
     # vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}", local_files_only=True).to(device)
 
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -211,11 +217,11 @@ def main(args):
     ])
 
     # dataset = ImageFolder(args.data_path, transform=transform)
-    dataset = LatentsShardDataset(args.data_path, 
-                                  split="train", 
+    dataset = LatentsShardDataset(args.data_path,
+                                  split="train",
                                   latent_normalizer=vae.latent_normalizer.numpy(),
                                   sample=True)
-    
+
     sampler = DistributedSampler(
         dataset,
         num_replicas=dist.get_world_size(),
@@ -254,9 +260,9 @@ def main(args):
             x = x.to(device)
             y = y.to(device)
             # with torch.no_grad():
-                # Already done by dataset
-                # Map input images to latent space + normalize latents:
-                # x = vae.encode(x).latent_dist.sample().mul_(0.18215)
+            # Already done by dataset
+            # Map input images to latent space + normalize latents:
+            # x = vae.encode(x).latent_dist.sample().mul_(0.18215)
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y)
             loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
@@ -279,7 +285,8 @@ def main(args):
                 avg_loss = torch.tensor(running_loss / log_steps, device=device)
                 dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
                 avg_loss = avg_loss.item() / dist.get_world_size()
-                logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+                logger.info(
+                    f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
                 if writer is not None:
                     writer.add_scalar("train/loss", avg_loss, train_steps)
                     writer.add_scalar("train/steps_per_sec", steps_per_sec, train_steps)
@@ -336,6 +343,7 @@ if __name__ == "__main__":
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
+    parser.add_argument("--vae", type=str, choices=["wan", "flux"], default="wan")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=1400)
