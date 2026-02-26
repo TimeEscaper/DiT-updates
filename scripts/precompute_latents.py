@@ -68,7 +68,7 @@ def process_split(split: str,
                             batch_size=batch_size,
                             shuffle=False,
                             num_workers=n_workers,
-                            pin_memory=True)
+                            pin_memory=False)
 
     buffer = []
     label_buffer = []
@@ -109,7 +109,8 @@ def process_split(split: str,
         if buffer_size >= chunk_size:
             chunk_data = np.concatenate(buffer, axis=0)
             save_path = output_root / f"chunk_{chunk_idx:06d}.npy"
-            np.save(save_path, chunk_data)
+            with open(save_path, 'wb') as f:
+                np.save(f, chunk_data)
 
             buffer = []
             buffer_size = 0
@@ -118,12 +119,15 @@ def process_split(split: str,
     if len(buffer) > 0:
         chunk_data = np.concatenate(buffer, axis=0)
         save_path = output_root / f"chunk_{chunk_idx:06d}.npy"
-        np.save(save_path, chunk_data)
+        with open(save_path, 'wb') as f:
+            np.save(f, chunk_data)
 
     # Save all labels as a single array (int64, small footprint)
     all_labels = np.concatenate(label_buffer, axis=0)
     labels_path = output_root / "labels.npy"
-    np.save(labels_path, all_labels)
+    # np.save(labels_path, all_labels)
+    with open(labels_path, 'wb') as f:
+        np.save(f, all_labels)
 
     # Compute per-channel mean and std from accumulators
     channel_mean = channel_sum / pixel_count                              # (C,)
