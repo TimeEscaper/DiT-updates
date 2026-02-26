@@ -8,6 +8,10 @@
 A minimal training script for DiT using PyTorch DDP.
 """
 import autoroot
+import autorootcwd
+import sys
+sys.path.append("sbervae")
+
 import torch
 # the first flag below was False when we tested this script but True makes A100 training a lot faster:
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -29,6 +33,7 @@ from time import time
 import argparse
 import logging
 import os
+import yaml
 
 from tqdm import tqdm
 
@@ -41,6 +46,7 @@ from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
 from dit_updates.data.latent_datasets import LatentsShardDataset
 from dit_updates.data.transforms import DiTCenterCrop
 from dit_updates.utils.files import resolve_path
+from dit_updates.vae.adapters.registry import resolve_adapter
 
 
 #################################################################################
@@ -170,11 +176,10 @@ def main(args):
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
 
     # TODO: Remove hardcoded VAE
-    vae = WANOfficialAdapter(name="wan_2.1_official", 
-                             checkpoint="Wan2.1-T2V-14B/Wan2.1_VAE.pth", 
-                             device=device,
-                             latent_norm_type="scale",
-                             latent_stats="imagenet2012")
+    vae = resolve_adapter(args.vae, 
+                          device=device,
+                          latent_norm_type="scale",
+                          latent_stats="imagenet2012")
 
     # TODO: Make this factor configurable
     latent_size = args.image_size // 8
@@ -332,25 +337,24 @@ def main(args):
     cleanup()
 
 
+def load_config(path: str) -> argparse.Namespace:
+    with open(path, "r") as f:
+        cfg = yaml.safe_load(f)
+
+    required = ["data_path", "vae"]
+    for key in required:
+        if cfg.get(key) is None:
+            raise ValueError(f"Required config field '{key}' is missing or null in {path}")
+
+    assert cfg["model"] in DiT_models, f"Unknown model '{cfg['model']}'. Choose from {list(DiT_models.keys())}"
+    assert cfg["image_size"] in (256, 512), f"image_size must be 256 or 512, got {cfg['image_size']}"
+
+    return argparse.Namespace(**cfg)
+
+
 if __name__ == "__main__":
-    # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-path", type=str, required=True)
-    parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
-    parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
-    parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--epochs", type=int, default=1400)
-    parser.add_argument("--global-batch-size", type=int, default=256)
-    parser.add_argument("--global-seed", type=int, default=0)
-    parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--log-every", type=int, default=100)
-    parser.add_argument("--ckpt-every", type=int, default=50_000)
-    parser.add_argument("--sample-every", type=int, default=10,
-                        help="Generate and log sample images every N epochs (0 to disable).")
-    parser.add_argument("--cfg-scale", type=float, default=4.0,
-                        help="Classifier-free guidance scale for sample generation.")
-    parser.add_argument("--num-sampling-steps", type=int, default=250,
-                        help="Number of DDPM steps for sample generation.")
-    args = parser.parse_args()
+    parser.add_argument("--config", type=str, required=True, help="Path to YAML config file.")
+    cli = parser.parse_args()
+    args = load_config(cli.config)
     main(args)
