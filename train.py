@@ -235,7 +235,7 @@ def main(args):
         shuffle=False,
         sampler=sampler,
         num_workers=args.num_workers,
-        pin_memory=True,
+        # pin_memory=True,
         drop_last=True
     )
     logger.info(f"Dataset contains {len(dataset):,} images ({args.data_path})")
