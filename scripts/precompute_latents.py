@@ -52,7 +52,7 @@ def process_split(split: str,
     output_root = Path(output_root) / \
         f"{dataset_name}__{model.name}__resolution_{resolution}{dtype_suffix}" / f"{split}"
 
-    if output_root.is_dir():
+    if output_root.is_dir() and any(output_root.iterdir()):
         raise FileExistsError(f"Output dir exists: {output_root}")
     else:
         print(f"Creating output directory {output_root}")
