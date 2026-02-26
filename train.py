@@ -36,10 +36,11 @@ from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 
-from lib.vae.adapters import VAEAdapter, WANOfficialAdapter
-from lib.data.latent_datasets import LatentsShardDataset
-from lib.data.transforms import DiTCenterCrop
-from lib.utils.files import resolve_path
+from dit_updates.vae.adapters.base import VAEAdapter
+from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
+from dit_updates.data.latent_datasets import LatentsShardDataset
+from dit_updates.data.transforms import DiTCenterCrop
+from dit_updates.utils.files import resolve_path
 
 
 #################################################################################

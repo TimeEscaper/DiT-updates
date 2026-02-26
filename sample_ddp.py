@@ -24,7 +24,7 @@ import numpy as np
 import math
 import argparse
 
-from lib.vae.adapters import WANOfficialAdapter
+from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
 
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):

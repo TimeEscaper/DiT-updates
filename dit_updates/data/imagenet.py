@@ -1,7 +1,7 @@
 import torch
 
 from typing import Callable
-from lib.utils.files import resolve_path
+from dit_updates.utils.files import resolve_path
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision.datasets import ImageFolder

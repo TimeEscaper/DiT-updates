@@ -8,7 +8,7 @@ import torch.cuda.amp as amp
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from lib.vae.models.distributions import DiagonalGaussianDistribution
+from dit_updates.vae.models.distributions import DiagonalGaussianDistribution
 
 __all__ = [
     'WanVAE',

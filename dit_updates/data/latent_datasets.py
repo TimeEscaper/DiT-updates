@@ -7,8 +7,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from lib.utils.files import resolve_path
-from lib.vae.models.normalization import NumPyLatentNormalizer
+from dit_updates.utils.files import resolve_path
+from dit_updates.vae.models.normalization import NumPyLatentNormalizer
 
 
 class LatentsShardDataset(Dataset):

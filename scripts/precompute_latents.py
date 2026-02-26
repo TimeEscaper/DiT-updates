@@ -9,9 +9,10 @@ import torch
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
 from tqdm import tqdm
-from lib.vae.adapters import VAEAdapter, WANOfficialAdapter
-from lib.data.imagenet import create_imagenet_dataset
-from lib.data.transforms import DiTCenterCrop
+from dit_updates.vae.adapters.base import VAEAdapter
+from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
+from dit_updates.data.imagenet import create_imagenet_dataset
+from dit_updates.data.transforms import DiTCenterCrop
 
 
 AVAILABLE_DATASETS = [
