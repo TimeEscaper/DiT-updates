@@ -11,3 +11,7 @@ dependencies:
     - timm
     - diffusers
     - accelerate
+    - autoroot
+    - autorootcwd
+    - tqdm
+    - kornia

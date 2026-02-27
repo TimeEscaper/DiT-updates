@@ -34,9 +34,9 @@ wheels/
 MANIFEST
 
 # Jupyter Notebook
-.ipynb_checkpoints
-*.ipynb
-notebooks/*
+# .ipynb_checkpoints
+# *.ipynb
+# notebooks/*
 
 # Environments
 env/

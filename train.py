@@ -7,6 +7,11 @@
 """
 A minimal training script for DiT using PyTorch DDP.
 """
+import autoroot
+import autorootcwd
+import sys
+sys.path.append("sbervae")
+
 import torch
 # the first flag below was False when we tested this script but True makes A100 training a lot faster:
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -28,12 +33,20 @@ from time import time
 import argparse
 import logging
 import os
+import yaml
 
 from tqdm import tqdm
 
 from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
+
+from dit_updates.vae.adapters.base import VAEAdapter
+from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
+from dit_updates.data.latent_datasets import LatentsShardDataset
+from dit_updates.data.transforms import DiTCenterCrop
+from dit_updates.utils.files import resolve_path
+from dit_updates.vae.adapters.registry import resolve_adapter
 
 
 #################################################################################
@@ -86,29 +99,8 @@ def create_logger(logging_dir):
     return logger
 
 
-def center_crop_arr(pil_image, image_size):
-    """
-    Center cropping implementation from ADM.
-    https://github.com/openai/guided-diffusion/blob/8fb3ad9197f16bbc40620447b2742e13458d2831/guided_diffusion/image_datasets.py#L126
-    """
-    while min(*pil_image.size) >= 2 * image_size:
-        pil_image = pil_image.resize(
-            tuple(x // 2 for x in pil_image.size), resample=Image.BOX
-        )
-
-    scale = image_size / min(*pil_image.size)
-    pil_image = pil_image.resize(
-        tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC
-    )
-
-    arr = np.array(pil_image)
-    crop_y = (arr.shape[0] - image_size) // 2
-    crop_x = (arr.shape[1] - image_size) // 2
-    return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
-
-
 @torch.no_grad()
-def generate_samples(ema_model, vae, diffusion, latent_size, device,
+def generate_samples(ema_model, vae: VAEAdapter, diffusion, latent_size, device,
                      num_classes, cfg_scale=4.0, num_samples=10, seed=0):
     """
     Generate a grid of sample images from the EMA model for TensorBoard logging.
@@ -120,7 +112,7 @@ def generate_samples(ema_model, vae, diffusion, latent_size, device,
     torch.manual_seed(seed)
 
     n = num_samples
-    z = torch.randn(n, 4, latent_size, latent_size, device=device)
+    z = torch.randn(n, vae.n_channels, latent_size, latent_size, device=device)
     y = torch.randint(0, num_classes, (n,), device=device)
 
     z = torch.cat([z, z], 0)
@@ -133,12 +125,15 @@ def generate_samples(ema_model, vae, diffusion, latent_size, device,
         model_kwargs=model_kwargs, progress=False, device=device
     )
     samples, _ = samples.chunk(2, dim=0)
-    samples = vae.decode(samples / 0.18215).sample
+
+    preprocessor = vae.create_preprocessor()
+    samples, _ = vae.decode(samples, denormalize=True)
 
     torch.random.set_rng_state(rng_state)
     torch.cuda.set_rng_state(cuda_rng_state, device)
 
-    samples = torch.clamp((samples + 1) / 2, 0, 1)
+    # samples = torch.clamp((samples + 1) / 2, 0, 1) We made this more flexible
+    samples = preprocessor.inverse(samples).clamp(0, 1)
     grid = make_grid(samples, nrow=5, padding=2)
     return grid
 
@@ -165,10 +160,11 @@ def main(args):
 
     # Setup an experiment folder:
     if rank == 0:
-        os.makedirs(args.results_dir, exist_ok=True)  # Make results folder (holds all experiment subfolders)
-        experiment_index = len(glob(f"{args.results_dir}/*"))
+        results_dir = str(resolve_path(args.results_dir, "experiment"))
+        os.makedirs(results_dir, exist_ok=True)  # Make results folder (holds all experiment subfolders)
+        experiment_index = len(glob(f"{results_dir}/*"))
         model_string_name = args.model.replace("/", "-")  # e.g., DiT-XL/2 --> DiT-XL-2 (for naming folders)
-        experiment_dir = f"{args.results_dir}/{experiment_index:03d}-{model_string_name}"  # Create an experiment folder
+        experiment_dir = f"{results_dir}/{experiment_index:03d}-{model_string_name}"  # Create an experiment folder
         checkpoint_dir = f"{experiment_dir}/checkpoints"  # Stores saved model checkpoints
         os.makedirs(checkpoint_dir, exist_ok=True)
         logger = create_logger(experiment_dir)
@@ -178,9 +174,18 @@ def main(args):
 
     # Create model:
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
+
+    # TODO: Remove hardcoded VAE
+    vae = resolve_adapter(args.vae, 
+                          device=device,
+                          latent_norm_type="scale",
+                          latent_stats="imagenet2012")
+
+    # TODO: Make this factor configurable
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
         input_size=latent_size,
+        in_channels=vae.n_channels,
         num_classes=args.num_classes
     )
     # Note that parameter initialization is done within the DiT constructor
@@ -188,7 +193,9 @@ def main(args):
     requires_grad(ema, False)
     model = DDP(model.to(device), device_ids=[rank])
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
-    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}", local_files_only=True).to(device)
+    
+    # vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}", local_files_only=True).to(device)
+
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
@@ -204,12 +211,18 @@ def main(args):
 
     # Setup data:
     transform = transforms.Compose([
-        transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
+        DiTCenterCrop(args.image_size),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+        vae.create_preprocessor()
     ])
-    dataset = ImageFolder(args.data_path, transform=transform)
+
+    # dataset = ImageFolder(args.data_path, transform=transform)
+    dataset = LatentsShardDataset(args.data_path, 
+                                  split="train", 
+                                  latent_normalizer=vae.latent_normalizer.numpy(),
+                                  sample=True)
+    
     sampler = DistributedSampler(
         dataset,
         num_replicas=dist.get_world_size(),
@@ -247,9 +260,10 @@ def main(args):
         for x, y in batch_iter:
             x = x.to(device)
             y = y.to(device)
-            with torch.no_grad():
+            # with torch.no_grad():
+                # Already done by dataset
                 # Map input images to latent space + normalize latents:
-                x = vae.encode(x).latent_dist.sample().mul_(0.18215)
+                # x = vae.encode(x).latent_dist.sample().mul_(0.18215)
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y)
             loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
@@ -307,7 +321,11 @@ def main(args):
                 )
                 writer.add_image("samples/ema_generations", grid, epoch)
                 writer.flush()
-                logger.info(f"Logged sample grid to TensorBoard (epoch {epoch})")
+                samples_dir = f"{experiment_dir}/samples"
+                os.makedirs(samples_dir, exist_ok=True)
+                grid_np = grid.permute(1, 2, 0).mul(255).clamp(0, 255).byte().cpu().numpy()
+                Image.fromarray(grid_np).save(f"{samples_dir}/epoch_{epoch:09d}.jpg")
+                logger.info(f"Logged sample grid to TensorBoard and saved to disk (epoch {epoch})")
             dist.barrier()
 
     model.eval()  # important! This disables randomized embedding dropout
@@ -319,26 +337,24 @@ def main(args):
     cleanup()
 
 
+def load_config(path: str) -> argparse.Namespace:
+    with open(path, "r") as f:
+        cfg = yaml.safe_load(f)
+
+    required = ["data_path", "vae"]
+    for key in required:
+        if cfg.get(key) is None:
+            raise ValueError(f"Required config field '{key}' is missing or null in {path}")
+
+    assert cfg["model"] in DiT_models, f"Unknown model '{cfg['model']}'. Choose from {list(DiT_models.keys())}"
+    assert cfg["image_size"] in (256, 512), f"image_size must be 256 or 512, got {cfg['image_size']}"
+
+    return argparse.Namespace(**cfg)
+
+
 if __name__ == "__main__":
-    # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-path", type=str, required=True)
-    parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
-    parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
-    parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--epochs", type=int, default=1400)
-    parser.add_argument("--global-batch-size", type=int, default=256)
-    parser.add_argument("--global-seed", type=int, default=0)
-    parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
-    parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--log-every", type=int, default=100)
-    parser.add_argument("--ckpt-every", type=int, default=50_000)
-    parser.add_argument("--sample-every", type=int, default=10,
-                        help="Generate and log sample images every N epochs (0 to disable).")
-    parser.add_argument("--cfg-scale", type=float, default=4.0,
-                        help="Classifier-free guidance scale for sample generation.")
-    parser.add_argument("--num-sampling-steps", type=int, default=250,
-                        help="Number of DDPM steps for sample generation.")
-    args = parser.parse_args()
+    parser.add_argument("--config", type=str, required=True, help="Path to YAML config file.")
+    cli = parser.parse_args()
+    args = load_config(cli.config)
     main(args)
