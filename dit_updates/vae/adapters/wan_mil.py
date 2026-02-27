@@ -105,6 +105,44 @@ class WANYuv2RgbAdapter(VAEAdapter):
         0.6429328322410583
     ]
 
+    _IMAGENET_2012_MEAN = [
+        -7.286853360710666e-05,
+        -0.18078672885894775,
+        -0.008212699554860592,
+        -0.007905763573944569,
+        0.019507741555571556,
+        -0.16465966403484344,
+        -0.02668576128780842,
+        0.08449669182300568,
+        0.008322713896632195,
+        0.008041778579354286,
+        -0.012736196629703045,
+        0.00617537135258317,
+        0.03087935410439968,
+        0.10986445099115372,
+        0.17370596528053284,
+        -0.05156862363219261
+    ]
+
+    _IMAGENET_2012_STD = [
+        0.0006974305724725127,
+        0.6393429636955261,
+        0.9233031868934631,
+        0.7281091213226318,
+        0.9659150838851929,
+        0.8390931487083435,
+        0.7966273427009583,
+        1.003061056137085,
+        0.6728984117507935,
+        1.0245347023010254,
+        0.7747780084609985,
+        0.7395362854003906,
+        0.9027074575424194,
+        0.7035373449325562,
+        0.6566562056541443,
+        0.6456491947174072
+    ]
+
     def __init__(self,
                  name: str = "wan-mil-yuv2rgb",
                  checkpoint: str | Path = "MIL-Wan2.1-YUV2RGB/model.pth",
@@ -141,7 +179,8 @@ class WANYuv2RgbAdapter(VAEAdapter):
             mean = WANYuv2RgbAdapter._IMAGENET_2012_200_MEAN
             std = WANYuv2RgbAdapter._IMAGENET_2012_200_STD
         elif latent_stats == "imagenet2012":
-            raise NotImplementedError(f"{latent_stats} computed ready yet")
+            mean = WANYuv2RgbAdapter._IMAGENET_2012_MEAN
+            std = WANYuv2RgbAdapter._IMAGENET_2012_STD
         else:
             raise ValueError(f"Invalid latent stats: {latent_stats}")
 
