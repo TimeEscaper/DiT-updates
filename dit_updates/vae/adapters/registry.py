@@ -1,6 +1,8 @@
 from dit_updates.vae.adapters.base import VAEAdapter
 from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
-from dit_updates.vae.adapters.wan_mil import WANYuv2RgbAdapter
+from dit_updates.vae.adapters.wan_mil import (WANYuv2RgbAdapter, 
+                                              WANYuv2YuvAdapter,
+                                              WANRgb2RgbAdapter)
 
 
 def resolve_adapter(adapter_name: str, *args, **kwargs) -> VAEAdapter:
@@ -11,5 +13,9 @@ def resolve_adapter(adapter_name: str, *args, **kwargs) -> VAEAdapter:
         return WANOfficialAdapter(*args, **kwargs)
     elif adapter_name == "wan-mil-yuv2rgb":
         return WANYuv2RgbAdapter(*args, **kwargs)
+    elif adapter_name == "wan-mil-yuv2yuv":
+        return WANYuv2YuvAdapter(*args, **kwargs)
+    elif adapter_name == "wan-mil-rgb2rgb":
+        return WANRgb2RgbAdapter(*args, **kwargs)
     else:
         raise ValueError(f"Invalid adapter name: {adapter_name}")

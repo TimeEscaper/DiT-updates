@@ -27,6 +27,8 @@ AVAILABLE_DATASETS = [
 AVAILABLE_MODELS = [
     "wan-2.1-official",
     "wan-mil-yuv2rgb"
+    "wan-mil-yuv2yuv",
+    "wan-mil-rgb2rgb",
 ]
 
 
