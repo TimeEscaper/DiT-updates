@@ -13,7 +13,6 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as T
 from tqdm import tqdm
 from dit_updates.vae.adapters.base import VAEAdapter
-from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
 from dit_updates.data.imagenet import create_imagenet_dataset
 from dit_updates.data.transforms import DiTCenterCrop
 from dit_updates.vae.adapters.registry import resolve_adapter
@@ -22,13 +21,6 @@ from dit_updates.vae.adapters.registry import resolve_adapter
 AVAILABLE_DATASETS = [
     "ImageNet2012_200",
     "ImageNet2012"
-]
-
-AVAILABLE_MODELS = [
-    "wan-2.1-official",
-    "wan-mil-yuv2rgb"
-    "wan-mil-yuv2yuv",
-    "wan-mil-rgb2rgb",
 ]
 
 
@@ -217,7 +209,6 @@ def main(
         None
     """
     assert dataset in AVAILABLE_DATASETS, f"Invalid dataset: {dataset}"
-    assert model in AVAILABLE_MODELS, f"Invalid model: {model}"
 
     model = resolve_model(model, device)
 

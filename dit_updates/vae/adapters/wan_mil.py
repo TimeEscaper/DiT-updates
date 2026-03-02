@@ -2,6 +2,7 @@ import torch
 import torchvision.transforms as T
 import torch.cuda.amp as amp
 import torch.nn.functional as F
+import torch.nn as nn
 
 from typing import Any
 from pathlib import Path
@@ -13,6 +14,7 @@ from dit_updates.vae.models.distributions import DiagonalGaussianDistribution
 from dit_updates.vae.models.normalization import (LatentNormalizationType,
                                                   TorchLatentNormalizer)
 from dit_updates.vae.adapters.wan_official import WANOfficialPreprocessor
+from dit_updates.vae.models.wan_split import WanImageYUVSplitVAE
 
 
 class WANYuv2RgbPreprocessor(VAEPreprocessor):
@@ -118,12 +120,48 @@ class WANYuv2YuvPreprocessor(VAEPreprocessor):
         return rgb
 
 
+class DummyPreprocessor(VAEPreprocessor):
+    """
+    Dummy preprocessor that does nothing.
+    """
+
+    def __init__(self):
+        """
+        Initialize the dummy preprocessor.
+        """
+        super(DummyPreprocessor, self).__init__()
+
+    def __call__(self, image: torch.Tensor) -> torch.Tensor:
+        """
+        Apply dummy preprocessor.
+        Args:
+            image (torch.Tensor): Input image tensor.
+
+        Returns:
+            torch.Tensor: Same image tensor.
+        """
+        return image
+
+    def inverse(self, image: torch.Tensor) -> torch.Tensor:
+        """
+        Inverse transform of the dummy preprocessor.
+
+        Args:
+            image (torch.Tensor): Input image tensor.
+
+        Returns:
+            torch.Tensor: Same image tensor.
+        """
+        return image
+
+
 class WANAdapterBase(VAEAdapter):
     """
     Internal WAN 2.1 adapter base class.
     """
 
     def __init__(self,
+                 model_cls: type[nn.Module],
                  name: str,
                  checkpoint: str | Path,
                  latent_norm_type: LatentNormalizationType | str,
@@ -131,6 +169,7 @@ class WANAdapterBase(VAEAdapter):
                  latent_stats_std: list[float],
                  prerpocessor_cls: type[VAEPreprocessor],
                  wan_kwargs: dict[str, Any],
+                 temporal_dim: bool = True,
                  device: str = "cuda",
                  dtype: torch.dtype = torch.float32):
         """
@@ -150,8 +189,8 @@ class WANAdapterBase(VAEAdapter):
 
         checkpoint = resolve_path(checkpoint, "model")
 
-        model = WanVAEModel(pretrained_path=str(checkpoint),
-                            **wan_kwargs)
+        model = model_cls(pretrained_path=str(checkpoint),
+                          **wan_kwargs)
         model = model.eval()
         model = model.to(device)
         self._model = model
@@ -161,6 +200,7 @@ class WANAdapterBase(VAEAdapter):
         self._latent_normalizer = latent_norm_type.make_torch(
             mean, std, device)
 
+        self._temporal_dim = temporal_dim
         self._dtype = dtype
 
     @property
@@ -205,7 +245,8 @@ class WANAdapterBase(VAEAdapter):
         else:  # (B, C, H, W)
             single = False
         
-        images = images.unsqueeze(2)  # (B, C, T, H, W) for model
+        if self._temporal_dim:
+            images = images.unsqueeze(2)  # (B, C, T, H, W) for model
 
         distribution = self._model.encode(images)
         mean = distribution.mean
@@ -214,9 +255,10 @@ class WANAdapterBase(VAEAdapter):
             latents = distribution.sample()
         else:
             latents = distribution.mode()
-        latents = latents.squeeze(2)  # (B, C, H, W)
-        mean = mean.squeeze(2)
-        logvar = logvar.squeeze(2)
+        if self._temporal_dim:
+            latents = latents.squeeze(2)  # (B, C, H, W)
+            mean = mean.squeeze(2)
+            logvar = logvar.squeeze(2)
 
         if normalize:
             latents = self._latent_normalizer.normalize(latents)
@@ -256,11 +298,12 @@ class WANAdapterBase(VAEAdapter):
         if denormalize:
             latents = self._latent_normalizer.denormalize(latents)
 
-        latents = latents.unsqueeze(2)  # (B, C, T, H, W) for model
+        if self._temporal_dim:
+            latents = latents.unsqueeze(2)  # (B, C, T, H, W) for model
 
         images = self._model.decode(latents)
-
-        images = images.squeeze(2)  # (B, C, H, W)
+        if self._temporal_dim:
+            images = images.squeeze(2)  # (B, C, H, W)
         if single:
             images = images.squeeze(0)  # (C, H, W)
 
@@ -380,7 +423,8 @@ class WANYuv2RgbAdapter(WANAdapterBase):
         else:
             raise ValueError(f"Invalid latent stats: {latent_stats}")
 
-        super(WANYuv2RgbAdapter, self).__init__(name=name,
+        super(WANYuv2RgbAdapter, self).__init__(model_cls=WanVAEModel,
+                                                name=name,
                                                 checkpoint=checkpoint,
                                                 latent_norm_type=latent_norm_type,
                                                 latent_stats_mean=mean,
@@ -425,7 +469,8 @@ class WANYuv2YuvAdapter(WANAdapterBase):
         else:
             raise ValueError("Invalid latent stats: {latent_stats}")
 
-        super(WANYuv2YuvAdapter, self).__init__(name=name,
+        super(WANYuv2YuvAdapter, self).__init__(model_cls=WanVAEModel,
+                                                name=name,
                                                 checkpoint=checkpoint,
                                                 latent_norm_type=latent_norm_type,
                                                 latent_stats_mean=mean,
@@ -469,7 +514,8 @@ class WANRgb2RgbAdapter(WANAdapterBase):
         else:
             raise ValueError("Invalid latent stats: {latent_stats}")
 
-        super(WANRgb2RgbAdapter, self).__init__(name=name,
+        super(WANRgb2RgbAdapter, self).__init__(model_cls=WanVAEModel,
+                                                name=name,
                                                 checkpoint=checkpoint,
                                                 latent_norm_type=latent_norm_type,
                                                 latent_stats_mean=mean,
@@ -478,3 +524,52 @@ class WANRgb2RgbAdapter(WANAdapterBase):
                                                 wan_kwargs={},
                                                 device=device, 
                                                 dtype=dtype)
+
+
+class WANSplitAttn12to4Adapter(WANAdapterBase):
+    """
+    Internal WAN 2.1 YUV Split Attention 12to4 adapter implementation.
+    """
+
+    def __init__(self,
+                 name: str = "wan-mil-split-attn-12to4",
+                 checkpoint: str | Path = "MIL-Wan-Split-Attn-12to4/model.pth",
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
+                 latent_stats: str | None = None,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANSplitAttn12to4Adapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan-mil-split-attn-12to4".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "MIL-Wan-Split-Attn-12to4/model.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "imagenet2012_200", or None). Defaults to None.
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
+        if latent_stats is None:
+            mean = [0.] * 16
+            std = [1.] * 16
+        elif latent_stats == "imagenet2012_200":
+            raise ValueError("Invalid latent stats: {latent_stats}")
+        elif latent_stats == "imagenet2012":
+            raise ValueError("Invalid latent stats: {latent_stats}")
+        else:
+            raise ValueError("Invalid latent stats: {latent_stats}")
+
+        super(WANSplitAttn12to4Adapter, self).__init__(model_cls=WanImageYUVSplitVAE,
+                                                       name=name,
+                                                       checkpoint=checkpoint,
+                                                       latent_norm_type=latent_norm_type,
+                                                       latent_stats_mean=mean,
+                                                       latent_stats_std=std,
+                                                       prerpocessor_cls=DummyPreprocessor,
+                                                       wan_kwargs={
+                                                            "fusion_type": "attention",
+                                                            "fusion_level": "stage1"
+                                                        },
+                                                       temporal_dim=False,
+                                                       device=device, 
+                                                       dtype=dtype)
