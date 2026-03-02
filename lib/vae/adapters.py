@@ -10,7 +10,6 @@ from lib.utils.files import resolve_path
 from lib.vae.models.distributions import DiagonalGaussianDistribution
 from lib.vae.models.flux import flux_vae_f8c16
 from lib.vae.models.normalization import (LatentNormalizationType,
-                                          NumPyLatentNormalizer,
                                           TorchLatentNormalizer)
 from lib.vae.models.wan import _video_vae
 
@@ -63,6 +62,15 @@ class VAEAdapter(ABC):
                latents: torch.Tensor,
                denormalize: bool = True) -> tuple[torch.Tensor, dict[str, Any]]:
         pass
+
+
+class IdentityPreprocessor(VAEPreprocessor):
+
+    def __call__(self, image: torch.Tensor) -> torch.Tensor:
+        return image
+
+    def inverse(self, image: torch.Tensor) -> torch.Tensor:
+        return image
 
 
 class WANOfficialPreprocessor(VAEPreprocessor):
@@ -433,7 +441,7 @@ class FLUXOfficialAdapter(VAEAdapter):
         return self._latent_normalizer
 
     def create_preprocessor(self) -> VAEPreprocessor:
-        return WANOfficialPreprocessor()
+        return IdentityPreprocessor()
 
     @torch.inference_mode()
     def encode(self,
