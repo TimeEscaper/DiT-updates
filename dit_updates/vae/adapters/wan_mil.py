@@ -8,6 +8,7 @@ from typing import Any
 from pathlib import Path
 from kornia.color.yuv import rgb_to_yuv420, yuv420_to_rgb
 from sbervae.lib.models import WanVAEModel
+from sbervae.lib.models.wan_vae.wan_vae import WanVAE_FCS
 from dit_updates.vae.adapters.base import VAEPreprocessor, VAEAdapter
 from dit_updates.utils.files import resolve_path
 from dit_updates.vae.models.distributions import DiagonalGaussianDistribution
@@ -524,6 +525,51 @@ class WANRgb2RgbAdapter(WANAdapterBase):
                                                 wan_kwargs={},
                                                 device=device, 
                                                 dtype=dtype)
+
+
+class WANFCSAdapter(WANAdapterBase):
+    """
+    Internal WAN 2.1 FCS adapter implementation.
+    """
+
+    def __init__(self,
+                 name: str = "wan-mil-fcs",
+                 checkpoint: str | Path = "MIL-Wan2.1-FreqReg/model.pth",
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
+                 latent_stats: str | None = None,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANFCSAdapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan-mil-fcs".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "MIL-Wan2.1-FreqReg/model.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "imagenet2012_200", or None). Defaults to None.
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
+        if latent_stats is None:
+            mean = [0.] * 16
+            std = [1.] * 16
+        elif latent_stats == "imagenet2012_200":
+            raise ValueError("Invalid latent stats: {latent_stats}")
+        elif latent_stats == "imagenet2012":
+            raise ValueError("Invalid latent stats: {latent_stats}")
+        else:
+            raise ValueError("Invalid latent stats: {latent_stats}")
+
+        super(WANFCSAdapter, self).__init__(model_cls=WanVAE_FCS,
+                                            name=name,
+                                            checkpoint=checkpoint,
+                                            latent_norm_type=latent_norm_type,
+                                            latent_stats_mean=mean,
+                                            latent_stats_std=std,
+                                            prerpocessor_cls=WANOfficialPreprocessor,
+                                            wan_kwargs={"frequency_separator": "default"},
+                                            device=device, 
+                                            dtype=dtype)
 
 
 class WANSplitAttn12to4Adapter(WANAdapterBase):
