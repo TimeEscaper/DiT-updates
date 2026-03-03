@@ -4,7 +4,9 @@ import torch.cuda.amp as amp
 
 from typing import Any
 from pathlib import Path
-from dit_updates.vae.adapters.base import VAEPreprocessor, VAEAdapter
+from dit_updates.vae.adapters.base import (VAEPreprocessor, 
+                                           VAEAdapter, 
+                                           load_latent_stats)
 from dit_updates.vae.models.wan import _video_vae
 from dit_updates.utils.files import resolve_path
 from dit_updates.vae.models.distributions import DiagonalGaussianDistribution
@@ -193,20 +195,7 @@ class WANOfficialAdapter(VAEAdapter):
         model = model.to(device)
         self._model = model
 
-        if latent_stats is None:
-            mean = [0.] * model.z_dim
-            std = [1.] * model.z_dim
-        elif latent_stats == "official":
-            mean = WANOfficialAdapter._OFFICIAL_MEAN
-            std = WANOfficialAdapter._OFFICIAL_STD
-        elif latent_stats == "imagenet2012_200":
-            mean = WANOfficialAdapter._IMAGENET_2012_200_MEAN
-            std = WANOfficialAdapter._IMAGENET_2012_200_STD
-        elif latent_stats == "imagenet2012":
-            mean = WANOfficialAdapter._IMAGENET_2012_MEAN
-            std = WANOfficialAdapter._IMAGENET_2012_STD
-        else:
-            raise ValueError(f"Invalid latent stats: {latent_stats}")
+        mean, std = load_latent_stats(WANOfficialAdapter, latent_stats, model.z_dim)
 
         mean = torch.tensor(mean, dtype=dtype, device=device)
         std = torch.tensor(std, dtype=dtype, device=device)

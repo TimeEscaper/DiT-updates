@@ -12,6 +12,10 @@ evaluation metrics via the ADM repo: https://github.com/openai/guided-diffusion/
 For a simple single-GPU/CPU sampling script, see sample.py.
 """
 import autoroot
+import autorootcwd
+import sys
+sys.path.append("sbervae")
+
 import torch
 import torch.distributed as dist
 from models import DiT_models
@@ -24,7 +28,7 @@ import numpy as np
 import math
 import argparse
 
-from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
+from dit_updates.vae.adapters.registry import resolve_adapter
 
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):
@@ -67,13 +71,10 @@ def main(args):
         assert args.num_classes == 1000
 
     # Load VAE:
-    vae = WANOfficialAdapter(
-        name="wan_2.1_official",
-        checkpoint="Wan2.1-T2V-14B/Wan2.1_VAE.pth",
-        device=device,
-        latent_norm_type="scale",
-        latent_stats="imagenet2012_200",
-    )
+    vae = resolve_adapter(args.vae, 
+                          device=device,
+                          latent_norm_type="scale",
+                          latent_stats="imagenet2012")
     preprocessor = vae.create_preprocessor()
 
     # Load model:
@@ -161,6 +162,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--vae", type=str)
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
     parser.add_argument("--sample-dir", type=str, default="samples")
     parser.add_argument("--per-proc-batch-size", type=int, default=32)
@@ -174,5 +176,6 @@ if __name__ == "__main__":
                         help="By default, use TF32 matmuls. This massively accelerates sampling on Ampere GPUs.")
     parser.add_argument("--ckpt", type=str, default=None,
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
+    parser.add_argument("--local-rank", type=int, default=0) # Dummy arg for Sber server compatibility
     args = parser.parse_args()
     main(args)

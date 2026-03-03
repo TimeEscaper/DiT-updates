@@ -9,7 +9,9 @@ from pathlib import Path
 from kornia.color.yuv import rgb_to_yuv420, yuv420_to_rgb
 from sbervae.lib.models import WanVAEModel
 from sbervae.lib.models.wan_vae.wan_vae import WanVAE_FCS
-from dit_updates.vae.adapters.base import VAEPreprocessor, VAEAdapter
+from dit_updates.vae.adapters.base import (VAEPreprocessor, 
+                                           VAEAdapter, 
+                                           load_latent_stats)
 from dit_updates.utils.files import resolve_path
 from dit_updates.vae.models.distributions import DiagonalGaussianDistribution
 from dit_updates.vae.models.normalization import (LatentNormalizationType,
@@ -412,17 +414,7 @@ class WANYuv2RgbAdapter(WANAdapterBase):
             device (str, optional): Device to use. Defaults to "cuda".
             dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
         """
-        if latent_stats is None:
-            mean = [0.] * 16
-            std = [1.] * 16
-        elif latent_stats == "imagenet2012_200":
-            mean = WANYuv2RgbAdapter._IMAGENET_2012_200_MEAN
-            std = WANYuv2RgbAdapter._IMAGENET_2012_200_STD
-        elif latent_stats == "imagenet2012":
-            mean = WANYuv2RgbAdapter._IMAGENET_2012_MEAN
-            std = WANYuv2RgbAdapter._IMAGENET_2012_STD
-        else:
-            raise ValueError(f"Invalid latent stats: {latent_stats}")
+        mean, std = load_latent_stats(WANYuv2RgbAdapter, latent_stats, 16)
 
         super(WANYuv2RgbAdapter, self).__init__(model_cls=WanVAEModel,
                                                 name=name,
@@ -460,15 +452,7 @@ class WANYuv2YuvAdapter(WANAdapterBase):
             device (str, optional): Device to use. Defaults to "cuda".
             dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
         """
-        if latent_stats is None:
-            mean = [0.] * 16
-            std = [1.] * 16
-        elif latent_stats == "imagenet2012_200":
-            raise ValueError("Invalid latent stats: {latent_stats}")
-        elif latent_stats == "imagenet2012":
-            raise ValueError("Invalid latent stats: {latent_stats}")
-        else:
-            raise ValueError("Invalid latent stats: {latent_stats}")
+        mean, std = load_latent_stats(WANYuv2YuvAdapter, latent_stats, 16)
 
         super(WANYuv2YuvAdapter, self).__init__(model_cls=WanVAEModel,
                                                 name=name,
@@ -486,6 +470,44 @@ class WANRgb2RgbAdapter(WANAdapterBase):
     """
     Internal WAN 2.1 RGB2RGB adapter implementation.
     """
+
+    _IMAGENET_2012_MEAN = [
+        -0.00038634706288576126,
+        -0.06125892698764801,
+        -0.3927463889122009,
+        0.5678133368492126,
+        -0.4044269323348999,
+        -0.060593269765377045,
+        0.3320796489715576,
+        -0.1419297754764557,
+        -0.18930397927761078,
+        0.06352389603853226,
+        0.011293075978755951,
+        0.630565881729126,
+        -0.06407170742750168,
+        -0.16139191389083862,
+        0.06914106756448746,
+        0.0072408802807331085
+    ]
+
+    _IMAGENET_2012_STD = [
+        0.004230488557368517,
+        1.4905462265014648,
+        1.6916476488113403,
+        1.63594388961792,
+        1.9967753887176514,
+        1.5547175407409668,
+        1.4185155630111694,
+        1.4980685710906982,
+        1.4175094366073608,
+        1.6830899715423584,
+        1.582936406135559,
+        1.4860095977783203,
+        1.570357322692871,
+        1.536580204963684,
+        1.6044707298278809,
+        1.4705582857131958
+    ]
 
     def __init__(self,
                  name: str = "wan-mil-rgb2rgb",
@@ -505,15 +527,7 @@ class WANRgb2RgbAdapter(WANAdapterBase):
             device (str, optional): Device to use. Defaults to "cuda".
             dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
         """
-        if latent_stats is None:
-            mean = [0.] * 16
-            std = [1.] * 16
-        elif latent_stats == "imagenet2012_200":
-            raise ValueError("Invalid latent stats: {latent_stats}")
-        elif latent_stats == "imagenet2012":
-            raise ValueError("Invalid latent stats: {latent_stats}")
-        else:
-            raise ValueError("Invalid latent stats: {latent_stats}")
+        mean, std = load_latent_stats(WANRgb2RgbAdapter, latent_stats, 16)
 
         super(WANRgb2RgbAdapter, self).__init__(model_cls=WanVAEModel,
                                                 name=name,
@@ -550,15 +564,7 @@ class WANFCSAdapter(WANAdapterBase):
             device (str, optional): Device to use. Defaults to "cuda".
             dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
         """
-        if latent_stats is None:
-            mean = [0.] * 16
-            std = [1.] * 16
-        elif latent_stats == "imagenet2012_200":
-            raise ValueError("Invalid latent stats: {latent_stats}")
-        elif latent_stats == "imagenet2012":
-            raise ValueError("Invalid latent stats: {latent_stats}")
-        else:
-            raise ValueError("Invalid latent stats: {latent_stats}")
+        mean, std = load_latent_stats(WANFCSAdapter, latent_stats, 16)
 
         super(WANFCSAdapter, self).__init__(model_cls=WanVAE_FCS,
                                             name=name,
@@ -595,15 +601,7 @@ class WANSplitAttn12to4Adapter(WANAdapterBase):
             device (str, optional): Device to use. Defaults to "cuda".
             dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
         """
-        if latent_stats is None:
-            mean = [0.] * 16
-            std = [1.] * 16
-        elif latent_stats == "imagenet2012_200":
-            raise ValueError("Invalid latent stats: {latent_stats}")
-        elif latent_stats == "imagenet2012":
-            raise ValueError("Invalid latent stats: {latent_stats}")
-        else:
-            raise ValueError("Invalid latent stats: {latent_stats}")
+        mean, std = load_latent_stats(WANSplitAttn12to4Adapter, latent_stats, 16)
 
         super(WANSplitAttn12to4Adapter, self).__init__(model_cls=WanImageYUVSplitVAE,
                                                        name=name,

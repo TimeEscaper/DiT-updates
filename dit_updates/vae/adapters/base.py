@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import torch
 
 from typing import Any
@@ -140,3 +142,32 @@ class VAEAdapter(ABC):
             tuple[torch.Tensor, dict[str, Any]]: The reconstructed images and info dict.
         """
         pass
+
+
+def load_latent_stats(cls: type[VAEAdapter], latent_stats: str | Path | None, z_dim: int) -> tuple[list[float], list[float]]:
+    """
+    Load the latent stats from the file.
+    """
+    if latent_stats is None:
+        mean = [0.] * z_dim
+        std = [1.] * z_dim
+        return mean, std
+    if isinstance(latent_stats, Path) or latent_stats.endswith(".json"):
+        with open(latent_stats, "r") as f:
+            data = json.load(f)
+        mean = data["stats"]["mean"]
+        std = data["stats"]["std"]
+        return mean, std
+    else:
+        if latent_stats == "official":
+            mean = cls._OFFICIAL_MEAN
+            std = cls._OFFICIAL_STD
+        elif latent_stats == "imagenet2012_200":
+            mean = cls._IMAGENET_2012_200_MEAN
+            std = cls._IMAGENET_2012_200_STD
+        elif latent_stats == "imagenet2012":
+            mean = cls._IMAGENET_2012_MEAN
+            std = cls._IMAGENET_2012_STD
+        else:
+            raise ValueError(f"Invalid latent stats: {latent_stats}")
+        return mean, std

@@ -30,6 +30,7 @@ from PIL import Image
 from copy import deepcopy
 from glob import glob
 from time import time
+from pathlib import Path
 import argparse
 import logging
 import os
@@ -179,7 +180,7 @@ def main(args):
     vae = resolve_adapter(args.vae, 
                           device=device,
                           latent_norm_type="scale",
-                          latent_stats="imagenet2012")
+                          latent_stats=Path(args.data_path) / "metadata.json")
 
     # TODO: Make this factor configurable
     latent_size = args.image_size // 8
@@ -355,6 +356,7 @@ def load_config(path: str) -> argparse.Namespace:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file.")
+    parser.add_argument("--local-rank", type=int, default=0) # Dummy arg for Sber server compatibility
     cli = parser.parse_args()
     args = load_config(cli.config)
     main(args)

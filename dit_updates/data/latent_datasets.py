@@ -42,8 +42,9 @@ class LatentsShardDataset(Dataset):
         self._num_samples = num_samples
 
         latents_root = resolve_path(latents_root, "dataset")
+        self._metadata_path = latents_root / "metadata.json"
 
-        with open(latents_root / "metadata.json", "r") as f:
+        with open(self._metadata_path, "r") as f:
             metadata = json.load(f)
         latents_format = metadata["latent_format"]
         if latents_format != "mean_std":
@@ -144,6 +145,16 @@ class LatentsShardDataset(Dataset):
 
         return latent, label
 
+    @property
+    def metadata_path(self) -> Path:
+        """
+        Get the path to the metadata file.
+
+        Returns:
+            Path: Path to the metadata file.
+        """
+        return self._metadata_path
+    
     def _sample_latent(self, mean_std: np.ndarray) -> np.ndarray:
         """
         Separate the mean and std from the input array and return either the mean (deterministic)
