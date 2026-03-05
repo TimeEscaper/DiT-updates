@@ -11,18 +11,20 @@ evaluation metrics via the ADM repo: https://github.com/openai/guided-diffusion/
 
 For a simple single-GPU/CPU sampling script, see sample.py.
 """
+import autoroot
 import torch
 import torch.distributed as dist
 from models import DiT_models
 from download import find_model
 from diffusion import create_diffusion
-from diffusers.models import AutoencoderKL
 from tqdm import tqdm
 import os
 from PIL import Image
 import numpy as np
 import math
 import argparse
+
+from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
 
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):
@@ -64,10 +66,21 @@ def main(args):
         assert args.image_size in [256, 512]
         assert args.num_classes == 1000
 
+    # Load VAE:
+    vae = WANOfficialAdapter(
+        name="wan_2.1_official",
+        checkpoint="Wan2.1-T2V-14B/Wan2.1_VAE.pth",
+        device=device,
+        latent_norm_type="scale",
+        latent_stats="imagenet2012_200",
+    )
+    preprocessor = vae.create_preprocessor()
+
     # Load model:
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
         input_size=latent_size,
+        in_channels=vae.n_channels,
         num_classes=args.num_classes
     ).to(device)
     # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
@@ -76,14 +89,13 @@ def main(args):
     model.load_state_dict(state_dict)
     model.eval()  # important!
     diffusion = create_diffusion(str(args.num_sampling_steps))
-    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     assert args.cfg_scale >= 1.0, "In almost all cases, cfg_scale be >= 1.0"
     using_cfg = args.cfg_scale > 1.0
 
     # Create folder to save samples:
     model_string_name = args.model.replace("/", "-")
     ckpt_string_name = os.path.basename(args.ckpt).replace(".pt", "") if args.ckpt else "pretrained"
-    folder_name = f"{model_string_name}-{ckpt_string_name}-size-{args.image_size}-vae-{args.vae}-" \
+    folder_name = f"{model_string_name}-{ckpt_string_name}-size-{args.image_size}-vae-{vae.name}-" \
                   f"cfg-{args.cfg_scale}-seed-{args.global_seed}"
     sample_folder_dir = f"{args.sample_dir}/{folder_name}"
     if rank == 0:
@@ -113,7 +125,7 @@ def main(args):
         # Setup classifier-free guidance:
         if using_cfg:
             z = torch.cat([z, z], 0)
-            y_null = torch.tensor([1000] * n, device=device)
+            y_null = torch.tensor([args.num_classes] * n, device=device)
             y = torch.cat([y, y_null], 0)
             model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
             sample_fn = model.forward_with_cfg
@@ -128,8 +140,9 @@ def main(args):
         if using_cfg:
             samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
 
-        samples = vae.decode(samples / 0.18215).sample
-        samples = torch.clamp(127.5 * samples + 128.0, 0, 255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()
+        samples, _ = vae.decode(samples, denormalize=True)
+        samples = preprocessor.inverse(samples).clamp(0, 1)
+        samples = (samples * 255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()
 
         # Save samples to disk as individual .png files
         for i, sample in enumerate(samples):
@@ -149,7 +162,6 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
-    parser.add_argument("--vae",  type=str, choices=["ema", "mse"], default="ema")
     parser.add_argument("--sample-dir", type=str, default="samples")
     parser.add_argument("--per-proc-batch-size", type=int, default=32)
     parser.add_argument("--num-fid-samples", type=int, default=50_000)
