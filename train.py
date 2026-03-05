@@ -7,31 +7,6 @@
 """
 A minimal training script for DiT using PyTorch DDP.
 """
-from lib.utils.files import resolve_path
-from lib.data.transforms import DiTCenterCrop
-from lib.data.latent_datasets import LatentsShardDataset
-from lib.vae.adapters import FLUXOfficialAdapter, VAEAdapter, WANOfficialAdapter
-from diffusers.models import AutoencoderKL
-from diffusion import create_diffusion
-from models import DiT_models
-from tqdm import tqdm
-import os
-import logging
-import argparse
-from time import time
-from glob import glob
-from copy import deepcopy
-from PIL import Image
-from collections import OrderedDict
-import numpy as np
-from torchvision.utils import make_grid
-from torchvision import transforms
-from torchvision.datasets import ImageFolder
-from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data import DataLoader
-from torch.nn.parallel import DistributedDataParallel as DDP
-import torch.distributed as dist
 import autoroot
 import autorootcwd
 import sys
