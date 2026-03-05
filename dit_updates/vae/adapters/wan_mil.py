@@ -583,6 +583,44 @@ class WANSplitAttn12to4Adapter(WANAdapterBase):
     Internal WAN 2.1 YUV Split Attention 12to4 adapter implementation.
     """
 
+    _IMAGENET_2012_MEAN = [
+        -0.003839731914922595,
+        0.005159264896064997,
+        0.009019199758768082,
+        -0.0007820131722837687,
+        0.0011651229579001665,
+        0.0063963960856199265,
+        0.003206053515896201,
+        -0.010293500497937202,
+        -0.006534602027386427,
+        -0.004016075283288956,
+        0.003994189202785492,
+        -0.004355896729975939,
+        -0.006619404535740614,
+        0.0004192973137833178,
+        0.005864075850695372,
+        0.0017565203597769141
+    ]
+
+    _IMAGENET_2012_STD = [
+        0.9926429986953735,
+        0.8986800909042358,
+        0.962837278842926,
+        0.9001625776290894,
+        0.9786242842674255,
+        0.9304022789001465,
+        0.9178804755210876,
+        1.019809365272522,
+        0.8938657641410828,
+        0.9049807190895081,
+        0.9471054077148438,
+        0.9187670350074768,
+        0.8424476981163025,
+        0.9782582521438599,
+        0.8591406345367432,
+        0.9455100893974304
+    ]
+
     def __init__(self,
                  name: str = "wan-mil-split-attn-12to4",
                  checkpoint: str | Path = "MIL-Wan-Split-Attn-12to4/model.pth",
@@ -614,6 +652,87 @@ class WANSplitAttn12to4Adapter(WANAdapterBase):
                                                             "fusion_type": "attention",
                                                             "fusion_level": "stage1"
                                                         },
+                                                       temporal_dim=False,
+                                                       device=device, 
+                                                       dtype=dtype)
+
+
+class WANSplitFiLM12to4Adapter(WANAdapterBase):
+    """
+    Internal WAN 2.1 YUV Split FiLM 12to4 adapter implementation.
+    """
+
+    def __init__(self,
+                 name: str = "wan-mil-split-film-12to4",
+                 checkpoint: str | Path = "MIL-Wan-Split-FiLM-12to4/model.pth",
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
+                 latent_stats: str | None = None,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANSplitFiLM12to4Adapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan-mil-split-film-12to4".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "MIL-Wan-Split-FiLM-12to4/model.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "imagenet2012_200", or None). Defaults to None.
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
+        mean, std = load_latent_stats(WANSplitFiLM12to4Adapter, latent_stats, 16)
+
+        super(WANSplitFiLM12to4Adapter, self).__init__(model_cls=WanImageYUVSplitVAE,
+                                                       name=name,
+                                                       checkpoint=checkpoint,
+                                                       latent_norm_type=latent_norm_type,
+                                                       latent_stats_mean=mean,
+                                                       latent_stats_std=std,
+                                                       prerpocessor_cls=DummyPreprocessor,
+                                                       wan_kwargs={
+                                                            "fusion_type": "film",
+                                                            "fusion_level": "stage1"
+                                                        },
+                                                       temporal_dim=False,
+                                                       device=device, 
+                                                       dtype=dtype)
+
+
+class WANSplit12to4Adapter(WANAdapterBase):
+    """
+    Internal WAN 2.1 YUV Split 12to4 adapter implementation.
+    """
+
+    def __init__(self,
+                 name: str = "wan-mil-split-12to4",
+                 checkpoint: str | Path = "MIL-Wan-Split-12to4/model.pth",
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
+                 latent_stats: str | None = None,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANSplit12to4Adapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan-mil-split-12to4".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "MIL-Wan-Split-12to4/model.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "imagenet2012_200", or None). Defaults to None.
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
+        mean, std = load_latent_stats(WANSplit12to4Adapter, latent_stats, 16)
+
+        super(WANSplit12to4Adapter, self).__init__(model_cls=WanImageYUVSplitVAE,
+                                                       name=name,
+                                                       checkpoint=checkpoint,
+                                                       latent_norm_type=latent_norm_type,
+                                                       latent_stats_mean=mean,
+                                                       latent_stats_std=std,
+                                                       prerpocessor_cls=DummyPreprocessor,
+                                                       wan_kwargs={
+                                                            "fusion_type": "none",
+                                                       },
                                                        temporal_dim=False,
                                                        device=device, 
                                                        dtype=dtype)

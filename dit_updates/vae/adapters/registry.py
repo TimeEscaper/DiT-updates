@@ -4,7 +4,9 @@ from dit_updates.vae.adapters.wan_mil import (WANYuv2RgbAdapter,
                                               WANYuv2YuvAdapter,
                                               WANRgb2RgbAdapter,
                                               WANSplitAttn12to4Adapter,
-                                              WANFCSAdapter)
+                                              WANFCSAdapter,
+                                              WANSplitFiLM12to4Adapter,
+                                              WANSplit12to4Adapter)
 
 
 def resolve_adapter(adapter_name: str, *args, **kwargs) -> VAEAdapter:
@@ -23,5 +25,9 @@ def resolve_adapter(adapter_name: str, *args, **kwargs) -> VAEAdapter:
         return WANFCSAdapter(*args, **kwargs)
     elif adapter_name == "wan-mil-split-attn-12to4":
         return WANSplitAttn12to4Adapter(*args, **kwargs)
+    elif adapter_name == "wan-mil-split-film-12to4":
+        return WANSplitFiLM12to4Adapter(*args, **kwargs)
+    elif adapter_name == "wan-mil-split-12to4":
+        return WANSplit12to4Adapter(*args, **kwargs)
     else:
         raise ValueError(f"Invalid adapter name: {adapter_name}")
