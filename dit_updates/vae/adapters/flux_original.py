@@ -3,6 +3,7 @@ from typing import Any
 
 from dit_updates.utils.files import resolve_path
 from dit_updates.vae.adapters.base import VAEAdapter, VAEPreprocessor
+from dit_updates.vae.adapters.wan_official import WANOfficialPreprocessor
 from dit_updates.vae.models.flux import flux_vae_f8c16
 from dit_updates.vae.models.distributions import DiagonalGaussianDistribution
 from dit_updates.vae.models.normalization import LatentNormalizationType, TorchLatentNormalizer
@@ -147,7 +148,7 @@ class FLUXOfficialAdapter(VAEAdapter):
         return self._latent_normalizer
 
     def create_preprocessor(self) -> VAEPreprocessor:
-        return IdentityPreprocessor()
+        return WANOfficialPreprocessor()
 
     @torch.inference_mode()
     def encode(self,
@@ -204,8 +205,8 @@ class FLUXOfficialAdapter(VAEAdapter):
 
         if single:
             images = images.squeeze(0)  # (C, H, W)
-        # todo: check output range
-        # images = images.clamp(-1, 1)  # From official code
+
+        images = images.clamp(-1, 1)  # From official code
 
         info = {}
 

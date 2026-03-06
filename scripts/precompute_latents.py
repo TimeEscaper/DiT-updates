@@ -26,7 +26,9 @@ AVAILABLE_DATASETS = [
 
 AVAILABLE_MODELS = [
     "wan-2.1-official",
-    "wan-mil-yuv2rgb"
+    "wan-mil-yuv2rgb",
+    "flux-official",
+    "flux-mil-yuv2rgb",
 ]
 
 
@@ -44,9 +46,9 @@ def resolve_model(model: str, device: str) -> VAEAdapter:
     Raises:
         ValueError: If an invalid model is supplied.
     """
-    return resolve_adapter(model, 
+    return resolve_adapter(model,
                            latent_norm_type="none",
-                           latent_stats=None, 
+                           latent_stats=None,
                            device=device)
 
 
@@ -101,11 +103,11 @@ def process_split(
                              model.create_preprocessor()]))
 
     dataloader = DataLoader(
-        dataset, 
-        batch_size=batch_size, 
-        shuffle=False, 
-        num_workers=n_workers, 
-        pin_memory=True
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=n_workers,
+        pin_memory=False,
     )
 
     buffer = []
@@ -192,8 +194,8 @@ def process_split(
 
 
 def main(
-    dataset: str, 
-    model: str, 
+    dataset: str,
+    model: str,
     output_root: str,
     resolution: int = 256,
     batch_size: int = 8,

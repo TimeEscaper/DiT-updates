@@ -1,3 +1,4 @@
 [submodule "sbervae"]
 	path = sbervae
 	url = git@github.com:machine-intelligence-laboratory/SberVAE.git
+	branch = dev
