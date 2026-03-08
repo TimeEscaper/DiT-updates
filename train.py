@@ -202,6 +202,31 @@ def main(args):
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
 
+    # ==========================================
+    # NEW: CHECKPOINT LOADING LOGIC
+    # ==========================================
+    train_steps = 0
+    if hasattr(args, "pretrained_path") and args.pretrained_path:
+        if os.path.isfile(args.pretrained_path):
+            logger.info(f"Loading checkpoint from {args.pretrained_path}")
+            # Map weights to the correct device for this specific DDP process
+            checkpoint = torch.load(args.pretrained_path, map_location=device)
+            
+            # The saved checkpoint uses model.module.state_dict(), so we load into model.module
+            model.module.load_state_dict(checkpoint["model"])
+            ema.load_state_dict(checkpoint["ema"])
+            opt.load_state_dict(checkpoint["opt"])
+            
+            # Attempt to parse train_steps from the filename (e.g., '0010000.pt' -> 10000)
+            try:
+                train_steps = int(Path(args.pretrained_path).stem)
+                logger.info(f"Successfully loaded checkpoint. Resuming from step {train_steps}.")
+            except ValueError:
+                logger.info("Successfully loaded checkpoint, but couldn't parse step count from filename.")
+        else:
+            logger.warning(f"Pretrained path '{args.pretrained_path}' does not exist! Starting from scratch.")
+    # ==========================================
+
     # Setup TensorBoard and sampling diffusion (rank 0 only):
     writer = None
     if rank == 0:
@@ -243,12 +268,15 @@ def main(args):
     logger.info(f"Dataset contains {len(dataset):,} images ({args.data_path})")
 
     # Prepare models for training:
-    update_ema(ema, model.module, decay=0)  # Ensure EMA is initialized with synced weights
+    # NEW: Only force-sync the EMA if we ARE NOT resuming from a checkpoint
+    if not (hasattr(args, "pretrained_path") and args.pretrained_path):
+        update_ema(ema, model.module, decay=0)  # Ensure EMA is initialized with synced weights
+    
     model.train()  # important! This enables embedding dropout for classifier-free guidance
     ema.eval()  # EMA model should always be in eval mode
 
     # Variables for monitoring/logging purposes:
-    train_steps = 0
+    # train_steps = 0  <-- Removed, defined above during checkpoint loading
     log_steps = 0
     running_loss = 0
     start_time = time()
@@ -357,6 +385,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file.")
     parser.add_argument("--local-rank", type=int, default=0) # Dummy arg for Sber server compatibility
+    parser.add_argument("--pretrained_path", type=str, default=None, help="Path to checkpoint to resume from (e.g., /path/to/0050000.pt)")
+    
     cli = parser.parse_args()
     args = load_config(cli.config)
+    
+    args.pretrained_path = cli.pretrained_path
+    
     main(args)
