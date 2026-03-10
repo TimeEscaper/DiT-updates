@@ -26,7 +26,9 @@ AVAILABLE_DATASETS = [
 
 AVAILABLE_MODELS = [
     "wan-2.1-official",
-    "wan-mil-yuv2rgb"
+    "wan-mil-yuv2rgb",
+    "flux-official",
+    "flux-mil-yuv2rgb",
 ]
 
 
@@ -44,9 +46,9 @@ def resolve_model(model: str, device: str) -> VAEAdapter:
     Raises:
         ValueError: If an invalid model is supplied.
     """
-    return resolve_adapter(model, 
+    return resolve_adapter(model,
                            latent_norm_type="none",
-                           latent_stats=None, 
+                           latent_stats=None,
                            device=device)
 
 
@@ -85,26 +87,27 @@ def process_split(
         FileExistsError: If the output directory already exists.
     """
     dtype_suffix = "__float16" if float16 else ""
-    output_root = Path(output_root) / f"{dataset_name}__{model.name}__resolution_{resolution}{dtype_suffix}" / f"{split}"
-    
-    if output_root.is_dir():
+    output_root = Path(output_root) / \
+        f"{dataset_name}__{model.name}__resolution_{resolution}{dtype_suffix}" / f"{split}"
+
+    if output_root.is_dir() and any(output_root.iterdir()):
         raise FileExistsError(f"Output dir exists: {output_root}")
     else:
         print(f"Creating output directory {output_root}")
         output_root.mkdir(parents=True, exist_ok=True)
 
     dataset = create_imagenet_dataset(
-        image_dir=f"{dataset_name}/{split}", 
-        transform=T.Compose([DiTCenterCrop(resolution), 
+        image_dir=f"{dataset_name}/{split}",
+        transform=T.Compose([DiTCenterCrop(resolution),
                              T.ToTensor(),
                              model.create_preprocessor()]))
 
     dataloader = DataLoader(
-        dataset, 
-        batch_size=batch_size, 
-        shuffle=False, 
-        num_workers=n_workers, 
-        pin_memory=True
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=n_workers,
+        pin_memory=False,
     )
 
     buffer = []
@@ -146,21 +149,25 @@ def process_split(
         if buffer_size >= chunk_size:
             chunk_data = np.concatenate(buffer, axis=0)
             save_path = output_root / f"chunk_{chunk_idx:06d}.npy"
-            np.save(save_path, chunk_data)
-            
+            with open(save_path, 'wb') as f:
+                np.save(f, chunk_data)
+
             buffer = []
             buffer_size = 0
             chunk_idx += 1
-        
+
     if len(buffer) > 0:
         chunk_data = np.concatenate(buffer, axis=0)
         save_path = output_root / f"chunk_{chunk_idx:06d}.npy"
-        np.save(save_path, chunk_data)
+        with open(save_path, 'wb') as f:
+            np.save(f, chunk_data)
 
     # Save all labels as a single array (int64, small footprint)
     all_labels = np.concatenate(label_buffer, axis=0)
     labels_path = output_root / "labels.npy"
-    np.save(labels_path, all_labels)
+    # np.save(labels_path, all_labels)
+    with open(labels_path, 'wb') as f:
+        np.save(f, all_labels)
 
     # Compute per-channel mean and std from accumulators
     channel_mean = channel_sum / pixel_count                              # (C,)
@@ -187,8 +194,8 @@ def process_split(
 
 
 def main(
-    dataset: str, 
-    model: str, 
+    dataset: str,
+    model: str,
     output_root: str,
     resolution: int = 256,
     batch_size: int = 8,
