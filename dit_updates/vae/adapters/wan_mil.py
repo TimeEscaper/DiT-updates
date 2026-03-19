@@ -774,3 +774,40 @@ class WANSplit12to4Adapter(WANAdapterBase):
                                                        temporal_dim=False,
                                                        device=device, 
                                                        dtype=dtype)
+
+
+class WANYuv2RgbFreqRegAdapter(WANAdapterBase):
+    """
+    Internal WAN 2.1 YUV2RGB FreqReg adapter implementation.
+    """
+
+    def __init__(self,
+                 name: str = "wan-mil-yuv2rgb-freqreg",
+                 checkpoint: str | Path = "MIL-Wan2.1-YUV2RGB-FreqReg/model.pth",
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
+                 latent_stats: str | None = None,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANYuv2RgbFreqRegAdapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan-mil-yuv2rgb-freqreg".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "MIL-Wan2.1-YUV2RGB-FreqReg/model.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "imagenet2012_200", or None). Defaults to None.
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
+        mean, std = load_latent_stats(WANYuv2RgbFreqRegAdapter, latent_stats, 16)
+
+        super(WANYuv2RgbFreqRegAdapter, self).__init__(model_cls=WanVAEModel,
+                                                name=name,
+                                                checkpoint=checkpoint,
+                                                latent_norm_type=latent_norm_type,
+                                                latent_stats_mean=mean,
+                                                latent_stats_std=std,
+                                                prerpocessor_cls=WANYuv2RgbPreprocessor,
+                                                wan_kwargs={"output_act": "yuv2rgb"},
+                                                device=device, 
+                                                dtype=dtype)
