@@ -112,12 +112,35 @@ def main(args):
     if rank == 0:
         print(f"Total number of images that will be sampled: {total_samples}")
     assert total_samples % dist.get_world_size() == 0, "total_samples must be divisible by world_size"
-    samples_needed_this_gpu = int(total_samples // dist.get_world_size())
+
+    # Count existing samples to support resuming from a previous (interrupted) run.
+    # Only rank 0 counts to avoid filesystem race conditions; result is broadcast.
+    existing_count = 0
+    if rank == 0:
+        existing_count = len([f for f in os.listdir(sample_folder_dir) if f.endswith('.png')])
+    existing_count_tensor = torch.tensor([existing_count], device=device)
+    dist.broadcast(existing_count_tensor, src=0)
+    existing_count = existing_count_tensor.item()
+
+    # Round down to complete global-batch boundary so we never leave index gaps
+    complete_samples = (existing_count // global_batch_size) * global_batch_size
+    remaining_samples = max(0, total_samples - complete_samples)
+
+    if rank == 0:
+        if complete_samples > 0:
+            print(f"Found {existing_count} existing samples ({complete_samples} from complete batches).")
+            print(f"Resuming generation from sample index {complete_samples}.")
+            # Class distribution note: both existing and new samples draw classes
+            # from torch.randint(0, num_classes) which is uniform. Concatenating two
+            # sets of i.i.d. uniform samples preserves the uniform distribution.
+        print(f"Remaining samples to generate: {remaining_samples}")
+
+    samples_needed_this_gpu = int(remaining_samples // dist.get_world_size())
     assert samples_needed_this_gpu % n == 0, "samples_needed_this_gpu must be divisible by the per-GPU batch size"
     iterations = int(samples_needed_this_gpu // n)
     pbar = range(iterations)
     pbar = tqdm(pbar) if rank == 0 else pbar
-    total = 0
+    total = complete_samples
     for _ in pbar:
         # Sample inputs:
         z = torch.randn(n, model.in_channels, latent_size, latent_size, device=device)
