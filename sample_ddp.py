@@ -20,7 +20,7 @@ import torch
 import torch.distributed as dist
 from models import DiT_models
 from download import find_model
-from diffusion import create_diffusion
+from diffusion import create_diffusion, create_rfm
 from tqdm import tqdm
 import os
 from PIL import Image
@@ -78,18 +78,31 @@ def main(args):
     preprocessor = vae.create_preprocessor()
 
     # Load model:
+    objective = args.objective
+    learn_sigma = (objective != "rfm")
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
         input_size=latent_size,
         in_channels=vae.n_channels,
-        num_classes=args.num_classes
+        num_classes=args.num_classes,
+        learn_sigma=learn_sigma,
     ).to(device)
     # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
     ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
     state_dict = find_model(ckpt_path)
     model.load_state_dict(state_dict)
     model.eval()  # important!
-    diffusion = create_diffusion(str(args.num_sampling_steps))
+    if objective == "rfm":
+        diffusion = create_rfm(
+            time_shift=args.rfm_time_shift,
+            time_emb_scale=args.rfm_time_emb_scale,
+            num_val_steps=args.num_sampling_steps,
+            base_sampler=args.rfm_base_sampler,
+            sigma_time_dist=args.rfm_sigma_time_dist,
+            pred_mode=args.rfm_pred_mode,
+        )
+    else:
+        diffusion = create_diffusion(str(args.num_sampling_steps))
     assert args.cfg_scale >= 1.0, "In almost all cases, cfg_scale be >= 1.0"
     using_cfg = args.cfg_scale > 1.0
 
@@ -129,15 +142,23 @@ def main(args):
             y_null = torch.tensor([args.num_classes] * n, device=device)
             y = torch.cat([y, y_null], 0)
             model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
-            sample_fn = model.forward_with_cfg
+            if objective == "rfm":
+                sample_fn = model.forward_with_cfg_flow
+            else:
+                sample_fn = model.forward_with_cfg
         else:
             model_kwargs = dict(y=y)
             sample_fn = model.forward
 
         # Sample images:
-        samples = diffusion.p_sample_loop(
-            sample_fn, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=False, device=device
-        )
+        if objective == "rfm":
+            samples = diffusion.p_sample_loop(
+                sample_fn, z, model_kwargs=model_kwargs
+            )
+        else:
+            samples = diffusion.p_sample_loop(
+                sample_fn, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=False, device=device
+            )
         if using_cfg:
             samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
 
@@ -176,6 +197,13 @@ if __name__ == "__main__":
                         help="By default, use TF32 matmuls. This massively accelerates sampling on Ampere GPUs.")
     parser.add_argument("--ckpt", type=str, default=None,
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
+    parser.add_argument("--objective", type=str, choices=["ddpm", "rfm"], default="ddpm",
+                        help="Training objective: 'ddpm' (epsilon prediction) or 'rfm' (rectified flow matching).")
+    parser.add_argument("--rfm-time-shift", type=float, default=3.0)
+    parser.add_argument("--rfm-time-emb-scale", type=float, default=6.28)
+    parser.add_argument("--rfm-base-sampler", type=str, default="logit-normal")
+    parser.add_argument("--rfm-sigma-time-dist", type=float, default=1.0)
+    parser.add_argument("--rfm-pred-mode", type=str, choices=["flow", "target"], default="flow")
     parser.add_argument("--local-rank", type=int, default=0) # Dummy arg for Sber server compatibility
     args = parser.parse_args()
     main(args)

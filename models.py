@@ -265,6 +265,18 @@ class DiT(nn.Module):
         eps = torch.cat([half_eps, half_eps], dim=0)
         return torch.cat([eps, rest], dim=1)
 
+    def forward_with_cfg_flow(self, x, t, y, cfg_scale):
+        """
+        CFG variant for flow matching (learn_sigma=False).
+        Applies guidance to all output channels (no epsilon/variance split).
+        """
+        half = x[: len(x) // 2]
+        combined = torch.cat([half, half], dim=0)
+        model_out = self.forward(combined, t, y)
+        cond_out, uncond_out = torch.split(model_out, len(model_out) // 2, dim=0)
+        cfg_out = uncond_out + cfg_scale * (cond_out - uncond_out)
+        return torch.cat([cfg_out, cfg_out], dim=0)
+
 
 #################################################################################
 #                   Sine/Cosine Positional Embedding Functions                  #

@@ -39,7 +39,7 @@ import yaml
 from tqdm import tqdm
 
 from models import DiT_models
-from diffusion import create_diffusion
+from diffusion import create_diffusion, create_rfm
 from diffusers.models import AutoencoderKL
 
 from dit_updates.vae.adapters.base import VAEAdapter
@@ -102,7 +102,8 @@ def create_logger(logging_dir):
 
 @torch.no_grad()
 def generate_samples(ema_model, vae: VAEAdapter, diffusion, latent_size, device,
-                     num_classes, cfg_scale=4.0, num_samples=10, seed=0):
+                     num_classes, cfg_scale=4.0, num_samples=10, seed=0,
+                     objective="ddpm"):
     """
     Generate a grid of sample images from the EMA model for TensorBoard logging.
     Uses classifier-free guidance and a fixed seed for consistent comparison
@@ -121,10 +122,15 @@ def generate_samples(ema_model, vae: VAEAdapter, diffusion, latent_size, device,
     y = torch.cat([y, y_null], 0)
     model_kwargs = dict(y=y, cfg_scale=cfg_scale)
 
-    samples = diffusion.p_sample_loop(
-        ema_model.forward_with_cfg, z.shape, z, clip_denoised=False,
-        model_kwargs=model_kwargs, progress=False, device=device
-    )
+    if objective == "rfm":
+        samples = diffusion.p_sample_loop(
+            ema_model.forward_with_cfg_flow, z, model_kwargs=model_kwargs
+        )
+    else:
+        samples = diffusion.p_sample_loop(
+            ema_model.forward_with_cfg, z.shape, z, clip_denoised=False,
+            model_kwargs=model_kwargs, progress=False, device=device
+        )
     samples, _ = samples.chunk(2, dim=0)
 
     preprocessor = vae.create_preprocessor()
@@ -133,7 +139,6 @@ def generate_samples(ema_model, vae: VAEAdapter, diffusion, latent_size, device,
     torch.random.set_rng_state(rng_state)
     torch.cuda.set_rng_state(cuda_rng_state, device)
 
-    # samples = torch.clamp((samples + 1) / 2, 0, 1) We made this more flexible
     samples = preprocessor.inverse(samples).clamp(0, 1)
     grid = make_grid(samples, nrow=5, padding=2)
     return grid
@@ -176,6 +181,8 @@ def main(args):
     # Create model:
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
 
+    objective = getattr(args, "objective", "ddpm")
+
     # TODO: Remove hardcoded VAE
     vae = resolve_adapter(args.vae, 
                           device=device,
@@ -184,16 +191,23 @@ def main(args):
 
     # TODO: Make this factor configurable
     latent_size = args.image_size // 8
+    learn_sigma = (objective != "rfm")
     model = DiT_models[args.model](
         input_size=latent_size,
         in_channels=vae.n_channels,
-        num_classes=args.num_classes
+        num_classes=args.num_classes,
+        learn_sigma=learn_sigma,
     )
     # Note that parameter initialization is done within the DiT constructor
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     requires_grad(ema, False)
     model = DDP(model.to(device), device_ids=[rank])
-    diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
+
+    if objective == "rfm":
+        rfm_cfg = getattr(args, "rfm", {})
+        diffusion = create_rfm(**rfm_cfg)
+    else:
+        diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
     
     # vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}", local_files_only=True).to(device)
 
@@ -233,7 +247,10 @@ def main(args):
         tb_dir = f"{experiment_dir}/tensorboard"
         writer = SummaryWriter(log_dir=tb_dir)
         logger.info(f"TensorBoard logs at {tb_dir}")
-    sample_diffusion = create_diffusion(str(args.num_sampling_steps))
+    if objective == "rfm":
+        sample_diffusion = diffusion
+    else:
+        sample_diffusion = create_diffusion(str(args.num_sampling_steps))
 
     # Setup data:
     transform = transforms.Compose([
@@ -347,6 +364,7 @@ def main(args):
                     ema, vae, sample_diffusion, latent_size, device,
                     num_classes=args.num_classes, cfg_scale=args.cfg_scale,
                     num_samples=10, seed=args.global_seed,
+                    objective=objective,
                 )
                 writer.add_image("samples/ema_generations", grid, epoch)
                 writer.flush()
@@ -377,6 +395,11 @@ def load_config(path: str) -> argparse.Namespace:
 
     assert cfg["model"] in DiT_models, f"Unknown model '{cfg['model']}'. Choose from {list(DiT_models.keys())}"
     assert cfg["image_size"] in (256, 512), f"image_size must be 256 or 512, got {cfg['image_size']}"
+
+    cfg.setdefault("objective", "ddpm")
+    assert cfg["objective"] in ("ddpm", "rfm"), f"objective must be 'ddpm' or 'rfm', got {cfg['objective']}"
+    if cfg["objective"] == "rfm":
+        assert "rfm" in cfg, "Config section 'rfm' is required when objective is 'rfm'"
 
     return argparse.Namespace(**cfg)
 
