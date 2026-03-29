@@ -34,6 +34,7 @@ from pathlib import Path
 import argparse
 import logging
 import os
+import shutil
 import yaml
 
 from tqdm import tqdm
@@ -173,6 +174,7 @@ def main(args):
         experiment_dir = f"{results_dir}/{experiment_index:03d}-{model_string_name}"  # Create an experiment folder
         checkpoint_dir = f"{experiment_dir}/checkpoints"  # Stores saved model checkpoints
         os.makedirs(checkpoint_dir, exist_ok=True)
+        shutil.copy2(args.config_path, f"{experiment_dir}/config.yaml")
         logger = create_logger(experiment_dir)
         logger.info(f"Experiment directory created at {experiment_dir}")
     else:
@@ -264,7 +266,8 @@ def main(args):
     dataset = LatentsShardDataset(args.data_path, 
                                   split="train", 
                                   latent_normalizer=vae.latent_normalizer.numpy(),
-                                  sample=True)
+                                  sample=True,
+                                  in_memory=args.data_in_memory)
     
     sampler = DistributedSampler(
         dataset,
@@ -397,6 +400,7 @@ def load_config(path: str) -> argparse.Namespace:
     assert cfg["image_size"] in (256, 512), f"image_size must be 256 or 512, got {cfg['image_size']}"
 
     cfg.setdefault("objective", "ddpm")
+    cfg.setdefault("data_in_memory", False)
     assert cfg["objective"] in ("ddpm", "rfm"), f"objective must be 'ddpm' or 'rfm', got {cfg['objective']}"
     if cfg["objective"] == "rfm":
         assert "rfm" in cfg, "Config section 'rfm' is required when objective is 'rfm'"
@@ -414,5 +418,6 @@ if __name__ == "__main__":
     args = load_config(cli.config)
     
     args.pretrained_path = cli.pretrained_path
+    args.config_path = cli.config
     
     main(args)
