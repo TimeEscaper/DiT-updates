@@ -1,10 +1,10 @@
 data_path: "wan-mil-split-attn-12to4 latents path"
-results_dir: "dit-updates/dit-rfm-xl-2-256__imagenet2012__wan-mil-split-film-12to4"
+results_dir: "dit-updates/dit-rfm-xl-2-256__imagenet2012__wan-mil-split-film-stage1-12to4"
 vae: wan-mil-split-film-12to4
 model: DiT-XL/2
 image_size: 256
 num_classes: 1000
-epochs: 70
+epochs: 100
 global_batch_size: 512
 global_seed: 0
 num_workers: 8
