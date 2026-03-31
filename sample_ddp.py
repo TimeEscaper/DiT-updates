@@ -12,11 +12,15 @@ evaluation metrics via the ADM repo: https://github.com/openai/guided-diffusion/
 For a simple single-GPU/CPU sampling script, see sample.py.
 """
 import autoroot
+import autorootcwd
+import sys
+sys.path.append("sbervae")
+
 import torch
 import torch.distributed as dist
 from models import DiT_models
 from download import find_model
-from diffusion import create_diffusion
+from diffusion import create_diffusion, create_rfm
 from tqdm import tqdm
 import os
 from PIL import Image
@@ -24,7 +28,7 @@ import numpy as np
 import math
 import argparse
 
-from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
+from dit_updates.vae.adapters.registry import resolve_adapter
 
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):
@@ -67,28 +71,38 @@ def main(args):
         assert args.num_classes == 1000
 
     # Load VAE:
-    vae = WANOfficialAdapter(
-        name="wan_2.1_official",
-        checkpoint="Wan2.1-T2V-14B/Wan2.1_VAE.pth",
-        device=device,
-        latent_norm_type="scale",
-        latent_stats="imagenet2012_200",
-    )
+    vae = resolve_adapter(args.vae, 
+                          device=device,
+                          latent_norm_type="scale",
+                          latent_stats="imagenet2012")
     preprocessor = vae.create_preprocessor()
 
     # Load model:
+    objective = args.objective
+    learn_sigma = (objective != "rfm")
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
         input_size=latent_size,
         in_channels=vae.n_channels,
-        num_classes=args.num_classes
+        num_classes=args.num_classes,
+        learn_sigma=learn_sigma,
     ).to(device)
     # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
     ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
     state_dict = find_model(ckpt_path)
     model.load_state_dict(state_dict)
     model.eval()  # important!
-    diffusion = create_diffusion(str(args.num_sampling_steps))
+    if objective == "rfm":
+        diffusion = create_rfm(
+            time_shift=args.rfm_time_shift,
+            time_emb_scale=args.rfm_time_emb_scale,
+            num_val_steps=args.num_sampling_steps,
+            base_sampler=args.rfm_base_sampler,
+            sigma_time_dist=args.rfm_sigma_time_dist,
+            pred_mode=args.rfm_pred_mode,
+        )
+    else:
+        diffusion = create_diffusion(str(args.num_sampling_steps))
     assert args.cfg_scale >= 1.0, "In almost all cases, cfg_scale be >= 1.0"
     using_cfg = args.cfg_scale > 1.0
 
@@ -111,12 +125,35 @@ def main(args):
     if rank == 0:
         print(f"Total number of images that will be sampled: {total_samples}")
     assert total_samples % dist.get_world_size() == 0, "total_samples must be divisible by world_size"
-    samples_needed_this_gpu = int(total_samples // dist.get_world_size())
+
+    # Count existing samples to support resuming from a previous (interrupted) run.
+    # Only rank 0 counts to avoid filesystem race conditions; result is broadcast.
+    existing_count = 0
+    if rank == 0:
+        existing_count = len([f for f in os.listdir(sample_folder_dir) if f.endswith('.png')])
+    existing_count_tensor = torch.tensor([existing_count], device=device)
+    dist.broadcast(existing_count_tensor, src=0)
+    existing_count = existing_count_tensor.item()
+
+    # Round down to complete global-batch boundary so we never leave index gaps
+    complete_samples = (existing_count // global_batch_size) * global_batch_size
+    remaining_samples = max(0, total_samples - complete_samples)
+
+    if rank == 0:
+        if complete_samples > 0:
+            print(f"Found {existing_count} existing samples ({complete_samples} from complete batches).")
+            print(f"Resuming generation from sample index {complete_samples}.")
+            # Class distribution note: both existing and new samples draw classes
+            # from torch.randint(0, num_classes) which is uniform. Concatenating two
+            # sets of i.i.d. uniform samples preserves the uniform distribution.
+        print(f"Remaining samples to generate: {remaining_samples}")
+
+    samples_needed_this_gpu = int(remaining_samples // dist.get_world_size())
     assert samples_needed_this_gpu % n == 0, "samples_needed_this_gpu must be divisible by the per-GPU batch size"
     iterations = int(samples_needed_this_gpu // n)
     pbar = range(iterations)
     pbar = tqdm(pbar) if rank == 0 else pbar
-    total = 0
+    total = complete_samples
     for _ in pbar:
         # Sample inputs:
         z = torch.randn(n, model.in_channels, latent_size, latent_size, device=device)
@@ -128,15 +165,23 @@ def main(args):
             y_null = torch.tensor([args.num_classes] * n, device=device)
             y = torch.cat([y, y_null], 0)
             model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
-            sample_fn = model.forward_with_cfg
+            if objective == "rfm":
+                sample_fn = model.forward_with_cfg_flow
+            else:
+                sample_fn = model.forward_with_cfg
         else:
             model_kwargs = dict(y=y)
             sample_fn = model.forward
 
         # Sample images:
-        samples = diffusion.p_sample_loop(
-            sample_fn, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=False, device=device
-        )
+        if objective == "rfm":
+            samples = diffusion.p_sample_loop(
+                sample_fn, z, model_kwargs=model_kwargs
+            )
+        else:
+            samples = diffusion.p_sample_loop(
+                sample_fn, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=False, device=device
+            )
         if using_cfg:
             samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
 
@@ -161,18 +206,27 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--vae", type=str)
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
     parser.add_argument("--sample-dir", type=str, default="samples")
     parser.add_argument("--per-proc-batch-size", type=int, default=32)
     parser.add_argument("--num-fid-samples", type=int, default=50_000)
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--cfg-scale",  type=float, default=1.5)
-    parser.add_argument("--num-sampling-steps", type=int, default=250)
+    parser.add_argument("--cfg-scale",  type=float, default=4.)
+    parser.add_argument("--num-sampling-steps", type=int, default=100)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--tf32", action=argparse.BooleanOptionalAction, default=True,
                         help="By default, use TF32 matmuls. This massively accelerates sampling on Ampere GPUs.")
     parser.add_argument("--ckpt", type=str, default=None,
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
+    parser.add_argument("--objective", type=str, choices=["ddpm", "rfm"], default="ddpm",
+                        help="Training objective: 'ddpm' (epsilon prediction) or 'rfm' (rectified flow matching).")
+    parser.add_argument("--rfm-time-shift", type=float, default=3.0)
+    parser.add_argument("--rfm-time-emb-scale", type=float, default=6.28)
+    parser.add_argument("--rfm-base-sampler", type=str, default="logit-normal")
+    parser.add_argument("--rfm-sigma-time-dist", type=float, default=1.0)
+    parser.add_argument("--rfm-pred-mode", type=str, choices=["flow", "target"], default="flow")
+    parser.add_argument("--local-rank", type=int, default=0) # Dummy arg for Sber server compatibility
     args = parser.parse_args()
     main(args)

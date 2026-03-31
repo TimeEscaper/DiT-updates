@@ -45,3 +45,4 @@ venv/
 sgm/modules/autoencoding/lpips/loss/vgg.pth
 
 results/
+rfm_to_mipt/
