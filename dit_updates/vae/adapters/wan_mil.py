@@ -890,3 +890,44 @@ class WANSplitFiLMFreqReg12to4Stage1Adapter(WANAdapterBase):
                                                                     temporal_dim=False,
                                                                     device=device, 
                                                                     dtype=dtype)
+
+
+class WANSplitFiLM12to4Stage3Adapter(WANAdapterBase):
+    """
+    Internal WAN 2.1 YUV Split FiLM 12to4 Stage 3 adapter implementation.
+    """
+
+    def __init__(self,
+                 name: str = "wan-mil-split-film-12to4-stage3",
+                 checkpoint: str | Path = "MIL-Wan-Split-FiLM-12to4-Stage3/model.pth",
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
+                 latent_stats: str | None = None,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANSplitFiLM12to4Stage3Adapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan-mil-split-film-12to4-stage3".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "MIL-Wan-Split-FiLM-12to4-Stage3/model.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "imagenet2012_200", or None). Defaults to None.
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
+        mean, std = load_latent_stats(WANSplitFiLM12to4Stage3Adapter, latent_stats, 16)
+
+        super(WANSplitFiLM12to4Stage3Adapter, self).__init__(model_cls=WanImageYUVSplitVAE,
+                                                       name=name,
+                                                       checkpoint=checkpoint,
+                                                       latent_norm_type=latent_norm_type,
+                                                       latent_stats_mean=mean,
+                                                       latent_stats_std=std,
+                                                       prerpocessor_cls=DummyPreprocessor,
+                                                       wan_kwargs={
+                                                            "fusion_type": "film",
+                                                            "fusion_level": "stage1"
+                                                        },
+                                                       temporal_dim=False,
+                                                       device=device, 
+                                                       dtype=dtype)
