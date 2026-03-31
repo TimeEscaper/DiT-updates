@@ -89,7 +89,7 @@ def process_split(
         output_root.mkdir(parents=True, exist_ok=True)
 
     dataset = create_imagenet_dataset(
-        image_dir=f"{dataset_name}/{split}",
+        image_dir=f"/home/akhtyamov/datasets/{dataset_name}/{split}",
         transform=T.Compose([DiTCenterCrop(resolution),
                              T.ToTensor(),
                              model.create_preprocessor()]))
@@ -190,8 +190,8 @@ def main(
     model: str,
     output_root: str,
     resolution: int = 256,
-    batch_size: int = 8,
-    n_workers: int = 8,
+    batch_size: int = 128,
+    n_workers: int = 16,
     chunk_size: int = 10_000,
     float16: bool = False,
     device: str = "cuda"
