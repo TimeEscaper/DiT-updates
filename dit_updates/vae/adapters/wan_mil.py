@@ -428,6 +428,42 @@ class WANYuv2RgbAdapter(WANAdapterBase):
                                                 dtype=dtype)
 
 
+class WANYuv2RgbStage1Adapter(WANAdapterBase):
+    """
+    Internal WAN 2.1 YUV2RGB Stage 1 adapter implementation.
+    """
+
+    def __init__(self,
+                 name: str = "wan-mil-yuv2rgb-stage1",
+                 checkpoint: str | Path = "MIL-Wan2.1-YUV2RGB-Stage1/model.pth",
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
+                 latent_stats: str | None = None,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANYuv2RgbStage1Adapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan-mil-yuv2rgb-stage1".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "MIL-Wan2.1-YUV2RGB-Stage1/model.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "imagenet2012_200", or None). Defaults to None.
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
+        mean, std = load_latent_stats(WANYuv2RgbStage1Adapter, latent_stats, 16)
+
+        super(WANYuv2RgbStage1Adapter, self).__init__(model_cls=WanVAEModel,
+                                                name=name,
+                                                checkpoint=checkpoint,
+                                                latent_norm_type=latent_norm_type,
+                                                latent_stats_mean=mean,
+                                                latent_stats_std=std,
+                                                prerpocessor_cls=WANYuv2RgbPreprocessor,
+                                                wan_kwargs={"output_act": "yuv2rgb"},
+                                                device=device, 
+                                                dtype=dtype)
+
 
 class WANYuv2YuvAdapter(WANAdapterBase):
     """
@@ -455,6 +491,43 @@ class WANYuv2YuvAdapter(WANAdapterBase):
         mean, std = load_latent_stats(WANYuv2YuvAdapter, latent_stats, 16)
 
         super(WANYuv2YuvAdapter, self).__init__(model_cls=WanVAEModel,
+                                                name=name,
+                                                checkpoint=checkpoint,
+                                                latent_norm_type=latent_norm_type,
+                                                latent_stats_mean=mean,
+                                                latent_stats_std=std,
+                                                prerpocessor_cls=WANYuv2YuvPreprocessor,
+                                                wan_kwargs={"output_act": "yuv2yuv"},
+                                                device=device, 
+                                                dtype=dtype)
+
+
+class WANYuv2YuvStage1Adapter(WANAdapterBase):
+    """
+    Internal WAN 2.1 YUV2YUV Stage 1 adapter implementation.
+    """
+
+    def __init__(self,
+                 name: str = "wan-mil-yuv2yuv-stage1",
+                 checkpoint: str | Path = "MIL-Wan2.1-YUV2YUV-Stage1/model.pth",
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
+                 latent_stats: str | None = None,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANYuv2YuvStage1Adapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan-mil-yuv2yuv-stage1".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "MIL-Wan2.1-YUV2YUV-Stage1/model.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "imagenet2012_200", or None). Defaults to None.
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
+        mean, std = load_latent_stats(WANYuv2YuvStage1Adapter, latent_stats, 16)
+
+        super(WANYuv2YuvStage1Adapter, self).__init__(model_cls=WanVAEModel,
                                                 name=name,
                                                 checkpoint=checkpoint,
                                                 latent_norm_type=latent_norm_type,
@@ -541,6 +614,43 @@ class WANRgb2RgbAdapter(WANAdapterBase):
                                                 dtype=dtype)
 
 
+class WANRgb2RgbStage1Adapter(WANAdapterBase):
+    """
+    Internal WAN 2.1 RGB2RGB Stage 1 adapter implementation.
+    """
+
+    def __init__(self,
+                 name: str = "wan-mil-rgb2rgb-stage1",
+                 checkpoint: str | Path = "MIL-Wan2.1-RGB2RGB-Stage1/model.pth",
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
+                 latent_stats: str | None = None,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANRgb2RgbStage1Adapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan-mil-rgb2rgb-stage1".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "MIL-Wan2.1-RGB2RGB-Stage1/model.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "imagenet2012_200", or None). Defaults to None.
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
+        mean, std = load_latent_stats(WANRgb2RgbStage1Adapter, latent_stats, 16)
+
+        super(WANRgb2RgbStage1Adapter, self).__init__(model_cls=WanVAEModel,
+                                                      name=name,
+                                                      checkpoint=checkpoint,
+                                                      latent_norm_type=latent_norm_type,
+                                                      latent_stats_mean=mean,
+                                                      latent_stats_std=std,
+                                                      prerpocessor_cls=WANOfficialPreprocessor,
+                                                      wan_kwargs={},
+                                                      device=device, 
+                                                      dtype=dtype)
+
+
 class WANFCSAdapter(WANAdapterBase):
     """
     Internal WAN 2.1 FCS adapter implementation.
@@ -567,6 +677,43 @@ class WANFCSAdapter(WANAdapterBase):
         mean, std = load_latent_stats(WANFCSAdapter, latent_stats, 16)
 
         super(WANFCSAdapter, self).__init__(model_cls=WanVAE_FCS,
+                                            name=name,
+                                            checkpoint=checkpoint,
+                                            latent_norm_type=latent_norm_type,
+                                            latent_stats_mean=mean,
+                                            latent_stats_std=std,
+                                            prerpocessor_cls=WANOfficialPreprocessor,
+                                            wan_kwargs={"frequency_separator": "default"},
+                                            device=device, 
+                                            dtype=dtype)
+
+
+class WANFCSStage1Adapter(WANAdapterBase):
+    """
+    Internal WAN 2.1 FCS Stage 1 adapter implementation.
+    """
+
+    def __init__(self,
+                 name: str = "wan-mil-fcs-stage1",
+                 checkpoint: str | Path = "MIL-Wan2.1-FreqReg-Stage1/model.pth",
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
+                 latent_stats: str | None = None,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANFCSStage1Adapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan-mil-fcs-stage1".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "MIL-Wan2.1-FreqReg-Stage1/model.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "imagenet2012_200", or None). Defaults to None.
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
+        mean, std = load_latent_stats(WANFCSStage1Adapter, latent_stats, 16)
+
+        super(WANFCSStage1Adapter, self).__init__(model_cls=WanVAE_FCS,
                                             name=name,
                                             checkpoint=checkpoint,
                                             latent_norm_type=latent_norm_type,
