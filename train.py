@@ -211,8 +211,6 @@ def main(args):
     else:
         diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
     
-    # vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}", local_files_only=True).to(device)
-
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
@@ -263,12 +261,12 @@ def main(args):
     ])
 
     # dataset = ImageFolder(args.data_path, transform=transform)
-    dataset = LatentsShardDataset(args.data_path, 
-                                  split="train", 
+    dataset = LatentsShardDataset(args.data_path,
+                                  split="train",
                                   latent_normalizer=vae.latent_normalizer.numpy(),
                                   sample=True,
                                   in_memory=args.data_in_memory)
-    
+
     sampler = DistributedSampler(
         dataset,
         num_replicas=dist.get_world_size(),
@@ -282,7 +280,7 @@ def main(args):
         shuffle=False,
         sampler=sampler,
         num_workers=args.num_workers,
-        pin_memory=True,
+        # pin_memory=True,
         drop_last=True
     )
     logger.info(f"Dataset contains {len(dataset):,} images ({args.data_path})")
@@ -310,9 +308,9 @@ def main(args):
             x = x.to(device)
             y = y.to(device)
             # with torch.no_grad():
-                # Already done by dataset
-                # Map input images to latent space + normalize latents:
-                # x = vae.encode(x).latent_dist.sample().mul_(0.18215)
+            # Already done by dataset
+            # Map input images to latent space + normalize latents:
+            # x = vae.encode(x).latent_dist.sample().mul_(0.18215)
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y)
             loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
@@ -335,7 +333,8 @@ def main(args):
                 avg_loss = torch.tensor(running_loss / log_steps, device=device)
                 dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
                 avg_loss = avg_loss.item() / dist.get_world_size()
-                logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+                logger.info(
+                    f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
                 if writer is not None:
                     writer.add_scalar("train/loss", avg_loss, train_steps)
                     writer.add_scalar("train/steps_per_sec", steps_per_sec, train_steps)

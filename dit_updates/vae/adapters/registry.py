@@ -1,4 +1,6 @@
 from dit_updates.vae.adapters.base import VAEAdapter
+from dit_updates.vae.adapters.flux_mil import FLUXYuv2RgbAdapter
+from dit_updates.vae.adapters.flux_original import FLUXOfficialAdapter
 from dit_updates.vae.adapters.wan_official import WANOfficialAdapter
 from dit_updates.vae.adapters.wan_mil import (WANYuv2RgbAdapter, 
                                               WANYuv2YuvAdapter,
@@ -38,5 +40,9 @@ def resolve_adapter(adapter_name: str, *args, **kwargs) -> VAEAdapter:
         return WANSplitFiLMFreqReg12to4Stage1Adapter(*args, **kwargs)
     elif adapter_name == "wan-mil-split-film-12to4-stage3":
         return WANSplitFiLM12to4Stage3Adapter(*args, **kwargs)
+    elif adapter_name == "flux-official":
+        return FLUXOfficialAdapter(*args, **kwargs)
+    elif adapter_name == "flux-mil-yuv2rgb":
+        return FLUXYuv2RgbAdapter(*args, **kwargs)
     else:
         raise ValueError(f"Invalid adapter name: {adapter_name}")
