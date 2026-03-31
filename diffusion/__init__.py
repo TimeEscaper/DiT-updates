@@ -5,6 +5,25 @@
 
 from . import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
+from .rectified_flow_matching import RectifiedFlowMatching
+
+
+def create_rfm(
+    time_shift=3.0,
+    time_emb_scale=6.28,
+    num_val_steps=100,
+    base_sampler="logit-normal",
+    sigma_time_dist=1.0,
+    pred_mode="flow",
+):
+    return RectifiedFlowMatching(
+        time_shift=time_shift,
+        time_emb_scale=time_emb_scale,
+        num_val_steps=num_val_steps,
+        base_sampler=base_sampler,
+        sigma_time_dist=sigma_time_dist,
+        pred_mode=pred_mode,
+    )
 
 
 def create_diffusion(
