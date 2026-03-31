@@ -89,7 +89,7 @@ def process_split(
         output_root.mkdir(parents=True, exist_ok=True)
 
     dataset = create_imagenet_dataset(
-        image_dir=f"/home/akhtyamov/datasets/{dataset_name}/{split}",
+        image_dir=f"{dataset_name}/{split}",
         transform=T.Compose([DiTCenterCrop(resolution),
                              T.ToTensor(),
                              model.create_preprocessor()]))
