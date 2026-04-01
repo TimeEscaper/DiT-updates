@@ -65,6 +65,50 @@ def main(args):
     torch.cuda.set_device(device)
     print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
 
+    # Compute sample folder path and check for existing samples before loading models:
+    model_string_name = args.model.replace("/", "-")
+    ckpt_string_name = os.path.basename(args.ckpt).replace(".pt", "") if args.ckpt else "pretrained"
+    folder_name = (f"{model_string_name}-{ckpt_string_name}-size-{args.image_size}-vae-{args.vae}-"
+                   f"cfg-{args.cfg_scale}-seed-{args.global_seed}")
+    sample_folder_dir = f"{args.sample_dir}/{folder_name}"
+    if rank == 0:
+        os.makedirs(sample_folder_dir, exist_ok=True)
+        print(f"Saving .png samples at {sample_folder_dir}")
+    dist.barrier()
+
+    n = args.per_proc_batch_size
+    global_batch_size = n * dist.get_world_size()
+    total_samples = int(math.ceil(args.num_fid_samples / global_batch_size) * global_batch_size)
+    if rank == 0:
+        print(f"Total number of images that will be sampled: {total_samples}")
+    assert total_samples % dist.get_world_size() == 0, "total_samples must be divisible by world_size"
+
+    existing_count = 0
+    if rank == 0:
+        existing_count = len([f for f in os.listdir(sample_folder_dir) if f.endswith('.png')])
+    existing_count_tensor = torch.tensor([existing_count], device=device)
+    dist.broadcast(existing_count_tensor, src=0)
+    existing_count = existing_count_tensor.item()
+
+    if existing_count >= args.num_fid_samples:
+        if rank == 0:
+            print(f"All {args.num_fid_samples} samples already exist. Skipping model loading.")
+            create_npz_from_sample_folder(sample_folder_dir, args.num_fid_samples)
+            print("Done.")
+        dist.barrier()
+        dist.destroy_process_group()
+        return
+
+    # Round down to complete global-batch boundary so we never leave index gaps
+    complete_samples = (existing_count // global_batch_size) * global_batch_size
+    remaining_samples = max(0, total_samples - complete_samples)
+
+    if rank == 0:
+        if complete_samples > 0:
+            print(f"Found {existing_count} existing samples ({complete_samples} from complete batches).")
+            print(f"Resuming generation from sample index {complete_samples}.")
+        print(f"Remaining samples to generate: {remaining_samples}")
+
     if args.ckpt is None:
         assert args.model == "DiT-XL/2", "Only DiT-XL/2 models are available for auto-download."
         assert args.image_size in [256, 512]
@@ -87,11 +131,10 @@ def main(args):
         num_classes=args.num_classes,
         learn_sigma=learn_sigma,
     ).to(device)
-    # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
     ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
     state_dict = find_model(ckpt_path)
     model.load_state_dict(state_dict)
-    model.eval()  # important!
+    model.eval()
     if objective == "rfm":
         diffusion = create_rfm(
             time_shift=args.rfm_time_shift,
@@ -105,48 +148,6 @@ def main(args):
         diffusion = create_diffusion(str(args.num_sampling_steps))
     assert args.cfg_scale >= 1.0, "In almost all cases, cfg_scale be >= 1.0"
     using_cfg = args.cfg_scale > 1.0
-
-    # Create folder to save samples:
-    model_string_name = args.model.replace("/", "-")
-    ckpt_string_name = os.path.basename(args.ckpt).replace(".pt", "") if args.ckpt else "pretrained"
-    folder_name = f"{model_string_name}-{ckpt_string_name}-size-{args.image_size}-vae-{vae.name}-" \
-                  f"cfg-{args.cfg_scale}-seed-{args.global_seed}"
-    sample_folder_dir = f"{args.sample_dir}/{folder_name}"
-    if rank == 0:
-        os.makedirs(sample_folder_dir, exist_ok=True)
-        print(f"Saving .png samples at {sample_folder_dir}")
-    dist.barrier()
-
-    # Figure out how many samples we need to generate on each GPU and how many iterations we need to run:
-    n = args.per_proc_batch_size
-    global_batch_size = n * dist.get_world_size()
-    # To make things evenly-divisible, we'll sample a bit more than we need and then discard the extra samples:
-    total_samples = int(math.ceil(args.num_fid_samples / global_batch_size) * global_batch_size)
-    if rank == 0:
-        print(f"Total number of images that will be sampled: {total_samples}")
-    assert total_samples % dist.get_world_size() == 0, "total_samples must be divisible by world_size"
-
-    # Count existing samples to support resuming from a previous (interrupted) run.
-    # Only rank 0 counts to avoid filesystem race conditions; result is broadcast.
-    existing_count = 0
-    if rank == 0:
-        existing_count = len([f for f in os.listdir(sample_folder_dir) if f.endswith('.png')])
-    existing_count_tensor = torch.tensor([existing_count], device=device)
-    dist.broadcast(existing_count_tensor, src=0)
-    existing_count = existing_count_tensor.item()
-
-    # Round down to complete global-batch boundary so we never leave index gaps
-    complete_samples = (existing_count // global_batch_size) * global_batch_size
-    remaining_samples = max(0, total_samples - complete_samples)
-
-    if rank == 0:
-        if complete_samples > 0:
-            print(f"Found {existing_count} existing samples ({complete_samples} from complete batches).")
-            print(f"Resuming generation from sample index {complete_samples}.")
-            # Class distribution note: both existing and new samples draw classes
-            # from torch.randint(0, num_classes) which is uniform. Concatenating two
-            # sets of i.i.d. uniform samples preserves the uniform distribution.
-        print(f"Remaining samples to generate: {remaining_samples}")
 
     samples_needed_this_gpu = int(remaining_samples // dist.get_world_size())
     assert samples_needed_this_gpu % n == 0, "samples_needed_this_gpu must be divisible by the per-GPU batch size"
