@@ -83,10 +83,14 @@ def process_split(
     output_root: str,
     float16: bool,
     n_workers: int,
-    device: str
+    device: str,
+    stats_only: bool = False,
 ) -> tuple[Path, dict]:
     """
     Process a data split to compute latents and statistics, saving the result as .npy chunks.
+
+    If ``stats_only`` is True, latents and labels are not written; only streaming
+    per-channel mean/std statistics are accumulated (and returned in metadata).
 
     Supports multi-GPU via ``torchrun``: the dataset is sharded across ranks, each
     rank writes its own chunk files (prefixed with ``r{rank:02d}_`` in distributed
@@ -104,6 +108,7 @@ def process_split(
         float16 (bool): Whether to use FP16 precision for output arrays.
         n_workers (int): Number of DataLoader workers.
         device (str): PyTorch device.
+        stats_only (bool): If True, skip saving latent chunks and labels; only compute statistics.
 
     Returns:
         tuple[Path, dict]: The path to the output directory and metadata dictionary.
@@ -164,13 +169,13 @@ def process_split(
 
     show_progress = rank == 0
     desc = f"Processing {dataset_name} {split}"
+    if stats_only:
+        desc += " (stats only)"
 
     for images, labels in tqdm(dataloader, desc=desc, disable=not show_progress):
         images = images.to(device)
         _, info = model.encode(images, normalize=False, sample=False)
         features_mean = info["raw_distribution"].mean.cpu().numpy()
-        features_std = info["raw_distribution"].std.cpu().numpy()
-        features = np.concatenate([features_mean, features_std], axis=1)
 
         # Accumulate per-channel stats in float64 before potential float16 cast
         feats_f64 = features_mean.astype(np.float64)  # (B, C, H, W)
@@ -178,6 +183,11 @@ def process_split(
         channel_sum_sq += (feats_f64 ** 2).sum(axis=(0, 2, 3))
         pixel_count += feats_f64.shape[0] * feats_f64.shape[2] * feats_f64.shape[3]
 
+        if stats_only:
+            continue
+
+        features_std = info["raw_distribution"].std.cpu().numpy()
+        features = np.concatenate([features_mean, features_std], axis=1)
         if float16:
             features = features.astype(np.float16)
 
@@ -195,7 +205,7 @@ def process_split(
             buffer_size = 0
             chunk_idx += 1
 
-    if len(buffer) > 0:
+    if not stats_only and len(buffer) > 0:
         chunk_data = np.concatenate(buffer, axis=0)
         save_path = output_root / f"chunk_{chunk_prefix}{chunk_idx:06d}.npy"
         with open(save_path, 'wb') as f:
@@ -214,25 +224,26 @@ def process_split(
         pixel_count = int(pixel_count_t.item())
 
     # ---- Save / merge labels ----
-    if distributed:
-        all_labels = np.concatenate(label_buffer, axis=0)
-        tmp_labels_path = output_root / f"_labels_r{rank:02d}.npy"
-        with open(tmp_labels_path, 'wb') as f:
-            np.save(f, all_labels)
-        dist.barrier()
-        if rank == 0:
-            label_parts = []
-            for r in range(world_size):
-                part_path = output_root / f"_labels_r{r:02d}.npy"
-                label_parts.append(np.load(part_path))
-                part_path.unlink()
-            merged_labels = np.concatenate(label_parts, axis=0)
+    if not stats_only:
+        if distributed:
+            all_labels = np.concatenate(label_buffer, axis=0)
+            tmp_labels_path = output_root / f"_labels_r{rank:02d}.npy"
+            with open(tmp_labels_path, 'wb') as f:
+                np.save(f, all_labels)
+            dist.barrier()
+            if rank == 0:
+                label_parts = []
+                for r in range(world_size):
+                    part_path = output_root / f"_labels_r{r:02d}.npy"
+                    label_parts.append(np.load(part_path))
+                    part_path.unlink()
+                merged_labels = np.concatenate(label_parts, axis=0)
+                with open(output_root / "labels.npy", 'wb') as f:
+                    np.save(f, merged_labels)
+        else:
+            all_labels = np.concatenate(label_buffer, axis=0)
             with open(output_root / "labels.npy", 'wb') as f:
-                np.save(f, merged_labels)
-    else:
-        all_labels = np.concatenate(label_buffer, axis=0)
-        with open(output_root / "labels.npy", 'wb') as f:
-            np.save(f, all_labels)
+                np.save(f, all_labels)
 
     # ---- Compute per-channel mean and std from accumulators ----
     channel_mean = channel_sum / pixel_count
@@ -249,6 +260,7 @@ def process_split(
         "latent_format": "mean_std",
         "dtype": "float16" if float16 else "float32",
         "model": model.name,
+        "stats_only": stats_only,
         "stats": {
             "mean": channel_mean.tolist(),
             "std": channel_std.tolist(),
@@ -267,11 +279,16 @@ def main(
     n_workers: int = 4,
     chunk_size: int = 10_000,
     float16: bool = False,
+    stats_only: bool = False,
     device: str = "cuda",
     local_rank: int = 0,
 ):
     """
     Main script entry point for precomputing latents from an image dataset.
+
+    Set ``stats_only=True`` to skip writing latent chunks and labels; only per-channel
+    mean/std (from latent means) are computed and written to ``metadata.json`` for
+    the train split (same layout as the full run).
 
     Supports multi-GPU via ``torchrun``::
 
@@ -289,6 +306,7 @@ def main(
         n_workers (int, optional): Number of DataLoader workers. Defaults to 16.
         chunk_size (int, optional): Samples per chunk file. Defaults to 10_000.
         float16 (bool, optional): Store latents as float16. Defaults to False.
+        stats_only (bool, optional): If True, do not save latents or labels; only statistics.
         device (str, optional): Torch device (e.g. "cuda"). Defaults to "cuda".
         local_rank (int, optional): Unused; accepted for torch.distributed.launch
             compatibility.
@@ -321,7 +339,8 @@ def main(
         n_workers=n_workers,
         device=device,
         chunk_size=chunk_size,
-        float16=float16
+        float16=float16,
+        stats_only=stats_only,
     )
 
     _, _ = process_split(
@@ -334,7 +353,8 @@ def main(
         n_workers=n_workers,
         device=device,
         chunk_size=chunk_size,
-        float16=float16
+        float16=float16,
+        stats_only=stats_only,
     )
 
     if rank == 0:

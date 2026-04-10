@@ -15,7 +15,8 @@ from dit_updates.vae.adapters.wan_mil import (WANYuv2RgbAdapter,
                                               WANRgb2RgbStage1Adapter,
                                               WANFCSStage1Adapter,
                                               WANYuv2RgbStage1Adapter,
-                                              WANYuv2YuvStage1Adapter)
+                                              WANYuv2YuvStage1Adapter,
+                                              WANSplitAttn12to4Stage3Adapter)
 
 
 def resolve_adapter(adapter_name: str, *args, **kwargs) -> VAEAdapter:
@@ -52,6 +53,8 @@ def resolve_adapter(adapter_name: str, *args, **kwargs) -> VAEAdapter:
         return WANSplitFiLMFreqReg12to4Stage1Adapter(*args, **kwargs)
     elif adapter_name == "wan-mil-split-film-12to4-stage3":
         return WANSplitFiLM12to4Stage3Adapter(*args, **kwargs)
+    elif adapter_name == "wan-mil-split-attn-12to4-stage3":
+        return WANSplitAttn12to4Stage3Adapter(*args, **kwargs)
     elif adapter_name == "flux-official":
         return FLUXOfficialAdapter(*args, **kwargs)
     elif adapter_name == "flux-mil-yuv2rgb":

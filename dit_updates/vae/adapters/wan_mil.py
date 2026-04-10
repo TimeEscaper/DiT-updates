@@ -694,6 +694,44 @@ class WANFCSAdapter(WANAdapterBase):
     Internal WAN 2.1 FCS adapter implementation.
     """
 
+    _IMAGENET_2012_MEAN = [
+        -0.026889808475971222,
+        0.021572163328528404,
+        -0.10603587329387665,
+        -0.04300852492451668,
+        -0.0044104657135903835,
+        0.08977996557950974,
+        -0.06413924694061279,
+        -0.009045019745826721,
+        0.10603518038988113,
+        0.11772821843624115,
+        0.12388269603252411,
+        -0.42700937390327454,
+        0.002769499784335494,
+        -0.3348850607872009,
+        -0.11531104892492294,
+        -0.089259572327137
+    ]
+
+    _IMAGENET_2012_STD = [
+        0.9723424315452576,
+        0.98272705078125,
+        0.996949315071106,
+        0.9888678789138794,
+        0.9848778247833252,
+        0.9801453948020935,
+        0.9851140379905701,
+        1.0364147424697876,
+        0.9703274965286255,
+        0.9923965930938721,
+        0.9730899930000305,
+        0.8813202977180481,
+        0.9827848672866821,
+        0.9316514730453491,
+        0.9687932133674622,
+        0.9763295650482178
+    ]
+
     def __init__(self,
                  name: str = "wan-mil-fcs",
                  checkpoint: str | Path = "MIL-Wan2.1-FreqReg/model.pth",
@@ -1116,3 +1154,45 @@ class WANSplitFiLM12to4Stage3Adapter(WANAdapterBase):
                                                        temporal_dim=False,
                                                        device=device, 
                                                        dtype=dtype)
+
+
+class WANSplitAttn12to4Stage3Adapter(WANAdapterBase):
+    """
+    Internal WAN 2.1 YUV Split Attention 12to4 Stage 3 adapter implementation.
+    """
+
+    def __init__(self,
+                 name: str = "wan-mil-split-attn-12to4-stage3",
+                 checkpoint: str | Path = "MIL-Wan-Split-Attn-12to4-Stage3/model.pth",
+                 latent_norm_type: LatentNormalizationType | str = LatentNormalizationType.SCALE,
+                 latent_stats: str | None = None,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float32):
+        """
+        Initialize the WANSplitAttn12to4Stage3Adapter.
+
+        Args:
+            name (str, optional): Adapter/model name. Defaults to "wan-mil-split-attn-12to4-stage3".
+            checkpoint (str | Path, optional): VAE checkpoint path. Defaults to "MIL-Wan-Split-Attn-12to4-Stage3/model.pth".
+            latent_norm_type (LatentNormalizationType | str, optional): Type of latent normalization. Defaults to LatentNormalizationType.SCALE.
+            latent_stats (str | None, optional): Stats to use for normalization ("imagenet2012", "imagenet2012_200", or None). Defaults to None.
+            device (str, optional): Device to use. Defaults to "cuda".
+            dtype (torch.dtype, optional): Floating point dtype for weights and tensors. Defaults to torch.float32.
+        """
+        mean, std = load_latent_stats(WANSplitAttn12to4Stage3Adapter, latent_stats, 16)
+
+        super(WANSplitAttn12to4Stage3Adapter, self).__init__(model_cls=WanImageYUVSplitVAE,
+                                                       name=name,
+                                                       checkpoint=checkpoint,
+                                                       latent_norm_type=latent_norm_type,
+                                                       latent_stats_mean=mean,
+                                                       latent_stats_std=std,
+                                                       prerpocessor_cls=DummyPreprocessor,
+                                                       wan_kwargs={
+                                                            "fusion_type": "attention",
+                                                            "fusion_level": "stage1"
+                                                        },
+                                                       temporal_dim=False,
+                                                       device=device, 
+                                                       dtype=dtype)
+

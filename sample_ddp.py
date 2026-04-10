@@ -27,8 +27,26 @@ from PIL import Image
 import numpy as np
 import math
 import argparse
+from typing import Optional
 
 from dit_updates.vae.adapters.registry import resolve_adapter
+
+
+def resolve_vae_id(ckpt_path: str, vae_arg: Optional[str]) -> str:
+    """Return explicit --vae, or read a single-line VAE id from a file named ``vae`` next to the checkpoint."""
+    if vae_arg is not None:
+        return vae_arg
+    vae_file = os.path.join(os.path.dirname(os.path.abspath(ckpt_path)), "vae")
+    if not os.path.isfile(vae_file):
+        raise FileNotFoundError(
+            f"--vae was not set and no sidecar file was found at {vae_file}. "
+            "Pass --vae or add a one-line VAE id in a file named 'vae' beside the checkpoint."
+        )
+    with open(vae_file, encoding="utf-8") as f:
+        vae_id = f.read().strip()
+    if not vae_id:
+        raise ValueError(f"VAE sidecar file {vae_file} is empty.")
+    return vae_id
 
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):
@@ -52,6 +70,8 @@ def main(args):
     """
     Run sampling.
     """
+    args.vae = resolve_vae_id(args.ckpt, args.vae)
+
     torch.backends.cuda.matmul.allow_tf32 = args.tf32  # True: fast but may lead to some small numerical differences
     assert torch.cuda.is_available(), "Sampling with DDP requires at least one GPU. sample.py supports CPU-only usage"
     torch.set_grad_enabled(False)
@@ -67,7 +87,7 @@ def main(args):
 
     # Compute sample folder path and check for existing samples before loading models:
     model_string_name = args.model.replace("/", "-")
-    ckpt_string_name = os.path.basename(args.ckpt).replace(".pt", "") if args.ckpt else "pretrained"
+    ckpt_string_name = os.path.basename(args.ckpt).replace(".pt", "")
     folder_name = (f"{model_string_name}-{ckpt_string_name}-size-{args.image_size}-vae-{args.vae}-"
                    f"cfg-{args.cfg_scale}-seed-{args.global_seed}")
     sample_folder_dir = f"{args.sample_dir}/{folder_name}"
@@ -109,11 +129,6 @@ def main(args):
             print(f"Resuming generation from sample index {complete_samples}.")
         print(f"Remaining samples to generate: {remaining_samples}")
 
-    if args.ckpt is None:
-        assert args.model == "DiT-XL/2", "Only DiT-XL/2 models are available for auto-download."
-        assert args.image_size in [256, 512]
-        assert args.num_classes == 1000
-
     # Load VAE:
     vae = resolve_adapter(args.vae, 
                           device=device,
@@ -131,8 +146,7 @@ def main(args):
         num_classes=args.num_classes,
         learn_sigma=learn_sigma,
     ).to(device)
-    ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
-    state_dict = find_model(ckpt_path)
+    state_dict = find_model(args.ckpt)
     model.load_state_dict(state_dict)
     model.eval()
     if objective == "rfm":
@@ -219,8 +233,8 @@ if __name__ == "__main__":
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--tf32", action=argparse.BooleanOptionalAction, default=True,
                         help="By default, use TF32 matmuls. This massively accelerates sampling on Ampere GPUs.")
-    parser.add_argument("--ckpt", type=str, default=None,
-                        help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
+    parser.add_argument("--ckpt", type=str, required=True,
+                        help="Path to a DiT checkpoint (.pt). There is no default; a pretrained model is not auto-loaded.")
     parser.add_argument("--objective", type=str, choices=["ddpm", "rfm"], default="ddpm",
                         help="Training objective: 'ddpm' (epsilon prediction) or 'rfm' (rectified flow matching).")
     parser.add_argument("--rfm-time-shift", type=float, default=3.0)
